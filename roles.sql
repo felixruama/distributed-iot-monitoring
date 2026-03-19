@@ -9,7 +9,7 @@ CREATE USER 'migrador_python'@'%' IDENTIFIED BY 'SenhaPython123';
 -- ==========================================
 -- 2. PERMISSÕES: MIGRADOR DO MONGODB (Python)
 -- ==========================================
--- Ele só escreve o que vem dos sensores e lê flags de simulação/outliers
+-- Ele só escreve o que vem dos sensorees e lê flags de simulação/outliers
 GRANT UPDATE ON labirinto_db.ocupacaoLabirinto TO 'migrador_python'@'%';
 GRANT INSERT ON labirinto_db.som TO 'migrador_python'@'%';
 GRANT INSERT ON labirinto_db.temperatura TO 'migrador_python'@'%';
