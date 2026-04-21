@@ -15,6 +15,7 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MONGO_DB = "sensores_db"
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = 1883
+BATCH_SIZE = 10  # Tamanho do bloco de movimentos
 
 # Tópicos
 TOPIC_MOV = f"pisid_mazemov_{N_JOGADOR}"
@@ -24,126 +25,119 @@ TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
 
-# Variáveis globais de controlo (Pág. 7 e 8)
-periodicidade = 2.0  # Pode ser alterada via MQTT config
-acks_pendentes = {}  # Guarda o status do ACK recebido { 'id_mongo': 1 ou 0 }
+# Variáveis globais de controlo
+periodicidade = 2.0
+last_ack_id = None
+ack_event = threading.Event()
 
 # --- CALLBACKS MQTT ---
 def on_connect(client, userdata, flags, rc):
-    print("[MQTT] S1 Ligado ao Broker!")
+    print(f"[MQTT] S1 Ligado ao Broker (Código: {rc})")
     client.subscribe(TOPIC_ACK, qos=2)
     client.subscribe(TOPIC_CONFIG, qos=2)
 
 def on_message(client, userdata, msg):
-    global periodicidade, acks_pendentes
-    payload = json.loads(msg.payload.decode('utf-8'))
-    
-    if msg.topic == TOPIC_ACK:
-        # Recebeu resposta do PC2 (Pág. 8)
-        doc_id = payload.get("Doc")
-        status = payload.get("Received")
-        acks_pendentes[doc_id] = status
+    global periodicidade, last_ack_id
+    try:
+        payload = json.loads(msg.payload.decode('utf-8'))
         
-    elif msg.topic == TOPIC_CONFIG:
-        # Atualização dinâmica da periodicidade em RAM (Pág. 7)
-        nova_periodicidade = payload.get("Periodicidade")
-        if nova_periodicidade:
-            periodicidade = nova_periodicidade
-            print(f"[CONFIG] Periodicidade alterada para {periodicidade}s")
+        if msg.topic == TOPIC_ACK:
+            # Resposta do PC2: {"Player": 7, "last_id": "...", "status": 1}
+            last_ack_id = payload.get("last_id")
+            ack_event.set()
+            print(f"[ACK] Recebido do PC2. Último ID inserido: {last_ack_id}")
+            
+        elif msg.topic == TOPIC_CONFIG:
+            nova_periodicidade = payload.get("Periodicidade")
+            if nova_periodicidade:
+                periodicidade = float(nova_periodicidade)
+                print(f"[CONFIG] Periodicidade atualizada: {periodicidade}s")
+    except Exception as e:
+        print(f"[MQTT] Erro no processamento da mensagem: {e}")
 
 # Configurar Cliente MQTT
-mqtt_client = mqtt.Client(client_id="Grupo7_S1")
+mqtt_client = mqtt.Client(client_id=f"Grupo7_PC1_v2")
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-mqtt_client.loop_start() # Thread em background para escutar respostas (Pág. 10)
+mqtt_client.loop_start()
 
 # Ligar ao MongoDB
 db = MongoClient(MONGO_URI)[MONGO_DB]
 
-# --- THREAD SECUNDÁRIA: Som e Temperatura (Pág. 10 e 11) ---
+# --- THREAD SECUNDÁRIA: Som e Temperatura (QoS 0) ---
 def processar_som_temperatura():
     while True:
         try:
-            # Filtrar documentos não migrados, não anómalos e não outliers (Pág. 12 e 13)
             filtro = {"Migrado": False, "Anomalia": False, "isOutlier": False}
             
-            # Processar Som
-            para_som = list(db.Som.find(filtro).limit(50))
-            for doc in para_som:
-                doc_str = {**doc, "_id": str(doc["_id"])}
-                # QoS 0 para Som e Temperatura (Pág. 11)
-                mqtt_client.publish(TOPIC_SOM, json.dumps(doc_str), qos=0)
-                db.Som.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
-            
-            # Processar Temperatura
-            para_temp = list(db.Temperatura.find(filtro).limit(50))
-            for doc in para_temp:
-                doc_str = {**doc, "_id": str(doc["_id"])}
-                mqtt_client.publish(TOPIC_TEMP, json.dumps(doc_str), qos=0)
-                db.Temperatura.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
-                
+            for col_name, topic in [("Som", TOPIC_SOM), ("Temperatura", TOPIC_TEMP)]:
+                docs = list(db[col_name].find(filtro).limit(50))
+                for doc in docs:
+                    payload = {**doc, "_id": str(doc["_id"])}
+                    mqtt_client.publish(topic, json.dumps(payload), qos=0)
+                    db[col_name].update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
+                    
         except Exception as e:
             print(f"[THREAD 2] Erro: {e}")
-            
         time.sleep(periodicidade)
 
-# --- MAIN THREAD: Movimentos com Handshake (Pág. 8 e 9) ---
+# --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
 def processar_movimentos_main():
-    print("--- A iniciar Migração de Movimentos (Main) ---")
+    global last_ack_id
+    print("--- Início da Migração de Movimentos por Blocos ---")
+    
     while True:
         try:
-            # Encontra o próximo movimento pendente respeitando a ordem
+            # 1. Obter bloco de movimentos não migrados
             filtro_mov = {"Migrado": False, "Anomalia": False}
-            doc = db.Movimento.find_one(filtro_mov, sort=[("Hour", 1)])
+            batch = list(db.Movimento.find(filtro_mov).sort("Hour", 1).limit(BATCH_SIZE))
             
-            if not doc:
+            if not batch:
                 time.sleep(periodicidade)
                 continue
 
-            doc_id = str(doc["_id"])
-            doc_str = {**doc, "_id": doc_id}
-            acks_pendentes[doc_id] = None # Reset ao estado do ACK
+            # 2. Preparar e enviar bloco
+            batch_data = [{**doc, "_id": str(doc["_id"])} for doc in batch]
+            ids_no_bloco = [d["_id"] for d in batch_data]
             
-            sucesso = False
-            while not sucesso:
-                print(f"[MAIN] A enviar movimento {doc_id}...")
-                # QoS 2 para Movimentos (Pág. 11)
-                mqtt_client.publish(TOPIC_MOV, json.dumps(doc_str), qos=2)
+            sucesso_bloco = False
+            while not sucesso_bloco:
+                print(f"[MAIN] Enviando bloco de {len(batch_data)} movimentos...")
+                ack_event.clear()
+                mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
                 
-                # Timeout à espera do ACK (Pág. 8)
-                timeout_espera = 5
-                tempo_inicial = time.time()
-                
-                while acks_pendentes[doc_id] is None and (time.time() - tempo_inicial) < timeout_espera:
-                    time.sleep(0.5)
-                
-                # Análise da Resposta
-                if acks_pendentes[doc_id] == 1:
-                    db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
-                    print(f"[MAIN] Confirmação recebida! {doc_id} migrado.")
-                    sucesso = True
-                    
-                elif acks_pendentes[doc_id] == 0:
-                    print(f"[MAIN] PC2 diz que falhou a inserção (Received=0). A reenviar...")
-                    acks_pendentes[doc_id] = None
-                    time.sleep(1)
-                    
+                # 3. Esperar ACK ou Timeout
+                if ack_event.wait(timeout=5.0):
+                    # Se o PC2 confirmou o último ID do nosso bloco
+                    if last_ack_id in ids_no_bloco:
+                        # Marcar como migrados no Mongo até ao ID confirmado
+                        for doc in batch:
+                            db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
+                            if str(doc["_id"]) == last_ack_id:
+                                break
+                        print(f"[MAIN] Bloco confirmado até {last_ack_id}.")
+                        sucesso_bloco = True
+                    else:
+                        print(f"[MAIN] ACK recebido ({last_ack_id}) não pertence ao bloco atual. Reenviando...")
                 else:
-                    # Tempo expirou sem resposta, fazer "Did you get it?" (Pág. 8 e 9)
-                    print(f"[MAIN] Timeout! A enviar didyougetit para o documento {doc_id}...")
-                    ping_payload = {"Player": N_JOGADOR, "Doc": doc_id}
+                    # 4. Timeout -> Handshake "didyougetit"
+                    print(f"[MAIN] Timeout! Perguntando ao PC2: Did you get it?")
+                    ping_payload = {"Player": N_JOGADOR}
                     mqtt_client.publish(TOPIC_PING, json.dumps(ping_payload), qos=2)
-                    time.sleep(2) # Espera 2 segundos para dar tempo ao PC2 de responder ao ping
                     
+                    # Espera mais um pouco pela resposta do didyougetit
+                    if ack_event.wait(timeout=3.0):
+                        # Se responder ao ping, tratamos como se fosse um ACK normal
+                        continue # Volta ao início do 'while not sucesso_bloco' para validar o last_ack_id
+                    else:
+                        print("[MAIN] Sem resposta ao didyougetit. Tentando reenvio do bloco...")
+
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
-    # Iniciar thread secundária para Som e Temp
     t = threading.Thread(target=processar_som_temperatura, daemon=True)
     t.start()
-    
-    # Executar lógica crítica no Main
     processar_movimentos_main()
