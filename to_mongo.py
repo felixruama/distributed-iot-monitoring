@@ -1,128 +1,108 @@
-import collections
-import collections.abc
-
-# CORREÇÃO OBRIGATÓRIA PARA PYTHON 3.13
-collections.MutableMapping = collections.abc.MutableMapping
-collections.Mapping = collections.abc.Mapping
-collections.Iterable = collections.abc.Iterable
-collections.MutableSet = collections.abc.MutableSet
-collections.Callable = collections.abc.Callable
-collections.Sequence = collections.abc.Sequence
-
 import paho.mqtt.client as mqtt
 from pymongo import MongoClient
 import json
-from datetime import datetime
 
-# ==========================================
-# CONFIGURAÇÕES DO MONGODB (via Docker)
-# ==========================================
-# Usando as credenciais do teu docker-compose.yml
-#MONGO_URI = "mongodb://root:root@127.0.0.1:27017/"
-MONGO_URI = "mongodb://127.0.0.1:27017/"
-DB_NAME = "labirinto_db"
+# CONFIGURAÇÕES DO MONGODB
+# Se estiver a ser usado o Docker, estas credenciais devem bater certo
+MONGO_URI = "mongodb://root:root@localhost:27017/"
+DB_NAME = "sensores_db"
 
 # Ligar ao MongoDB
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[DB_NAME]
 
 # Definir as coleções
-col_sons = db["sons"]
-col_temp = db["temperatura"]
-col_mov = db["movimentos"]
+col_som = db["Som"]
+col_temp = db["Temperatura"]
+col_mov = db["Movimento"]
 
-# ==========================================
 # CONFIGURAÇÕES DO MQTT E FILTRO
-# ==========================================
 BROKER = "broker.hivemq.com"
 PORT = 1883
 
-# Tópicos que a tua app mazerun.exe (labirinto 7) publica
-TOPIC_SONS = "pisid_mazesound_7"
+# Tópicos do grupo (n=7)
+TOPIC_SOM = "pisid_mazesound_7"
 TOPIC_TEMP = "pisid_mazetemp_7"
 TOPIC_MOV = "pisid_mazemov_7"
 
-# Dicionário para guardar a última mensagem de cada tópico (Filtro de Duplicados)
+# Dicionário para guardar apenas o texto da última mensagem de cada tópico
 ultimas_mensagens = {}
-
 
 # Callback quando o script se liga ao broker
 def on_connect(client, userdata, flags, reason_code, properties):
-    print(f"✅ Ligado ao broker HiveMQ com sucesso! (Código: {reason_code})")
+    print(f"Ligado ao broker HiveMQ com sucesso! (Código: {reason_code})") # O reason_code 0 indica sucesso
 
-    # Subscrever aos 3 tópicos com QoS 1 (Garantia de entrega)
+    # Como o Script 0 está sempre online, usamos QoS 1 para garantir a receção
+    # de absolutamente todos os dados gerados pelo simulador.
     client.subscribe([
-        (TOPIC_SONS, 1),
+        (TOPIC_SOM, 1),
         (TOPIC_TEMP, 1),
         (TOPIC_MOV, 1)
     ])
-    print("📡 A escutar mensagens (QoS 1) com filtro de duplicados ativo...")
+    print("A escutar mensagens (QoS 1) de todos os sensores...")
 
 
 # Callback quando uma mensagem é recebida
 def on_message(client, userdata, msg):
     topico = msg.topic
     payload = msg.payload.decode('utf-8')
-    agora = datetime.utcnow()  # Guardamos logo a hora exata em que chegou
 
-    # ==========================================
-    # FILTRO DE DUPLICADOS DE REDE
-    # ==========================================
+    
+    # Se já recebemos algo neste tópico antes, comparamos o texto atual com o último texto guardado
     if topico in ultimas_mensagens:
-        ultima_msg = ultimas_mensagens[topico]
+        # Se o texto for igual à última mensagem, é um eco da rede
+        if payload == ultimas_mensagens[topico]:
+            return # ignora o duplicado
+            
+    # Atualiza a memória com este novo texto para comparar com a próxima mensagem
+    ultimas_mensagens[topico] = payload
 
-        # Calcula a diferença de tempo em segundos
-        diferenca_tempo = (agora - ultima_msg['tempo']).total_seconds()
-
-        # Se o texto for igual E a diferença for menor que 0.5 segundos
-        if payload == ultima_msg['texto'] and diferenca_tempo < 0.5:
-            print(f"♻️ Duplicado ignorado no tópico {topico} (chegou {diferenca_tempo:.3f}s depois)")
-            return  # Pára a execução aqui, não guarda na base de dados!
-
-    # Atualiza a memória com a nova mensagem válida
-    ultimas_mensagens[topico] = {'texto': payload, 'tempo': agora}
-    # ==========================================
-
-    print(f"[{topico}] Mensagem recebida: {payload}")
-
-    # Tentar converter a mensagem para JSON
     try:
-        dados = json.loads(payload)
+        # Converter string JSON num dicionário Python
+        documento = json.loads(payload)
     except json.JSONDecodeError:
-        # Se for apenas um valor (ex: "25.5")
-        dados = {"valor": payload}
+        print(f"[{topico}] Ignorado - Formato JSON inválido: {payload}")
+        return
 
-    # Preparar o documento a inserir no Mongo
-    documento = {
-        "topico": topico,
-        "dados": dados,
-        "data_rececao": agora  # Usamos a mesma hora 'agora' do início da função
-    }
+    
+    documento["Migrado"] = False
+    documento["Anomalia"] = False
 
-    # Encaminhar para a coleção correta dependendo do tópico
-    if topico == TOPIC_SONS:
-        col_sons.insert_one(documento)
+    if topico == TOPIC_SOM:
+        documento["isOutlier"] = False
+        col_som.insert_one(documento)
+        
+        # Preparamos um print sem o _id (criado pelo Mongo) só para a consola ficar limpa
+        doc_print = {k: v for k, v in documento.items() if k != '_id'}
+        print(f"[Som] Guardado no Mongo: {doc_print}")
+
     elif topico == TOPIC_TEMP:
+        documento["isOutlier"] = False
         col_temp.insert_one(documento)
+        
+        doc_print = {k: v for k, v in documento.items() if k != '_id'}
+        print(f"[Temperatura] Guardado no Mongo: {doc_print}")
+
     elif topico == TOPIC_MOV:
         col_mov.insert_one(documento)
+        
+        doc_print = {k: v for k, v in documento.items() if k != '_id'}
+        print(f"[Movimento] Guardado no Mongo: {doc_print}")
 
-
-# ==========================================
 # INICIAR O CLIENTE MQTT
-# ==========================================
-# A usar a versão 2 da API que é o standard nas versões mais recentes do Paho
+# Usamos a API v2 que é a standard mais recente do Paho MQTT
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
 client.on_message = on_message
 
-print("A tentar ligar ao broker...")
-client.connect(BROKER, PORT, 60)
+print("A tentar ligar ao broker (Script 0 - Mqtt to MongoDB)...")
+client.connect(BROKER, PORT, 60) # 60 segundos de keepalive, para garantir que a ligação se mantém ativa mesmo que haja algum atraso na rede
 
-# Manter o script a correr para sempre à escuta de mensagens
+# Manter o script a correr infinitamente
 try:
     client.loop_forever()
 except KeyboardInterrupt:
+    # Se carregares em Ctrl+C na consola, ele desliga de forma limpa
     print("\nScript terminado pelo utilizador.")
     client.disconnect()
     mongo_client.close()
