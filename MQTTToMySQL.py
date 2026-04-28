@@ -15,9 +15,9 @@ MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 
 # Tópicos
-TOPIC_MOV = f"pisid_mazemov_{N_JOGADOR}"
-TOPIC_SOM = f"pisid_mazesound_{N_JOGADOR}"
-TOPIC_TEMP = f"pisid_mazetemp_{N_JOGADOR}"
+TOPIC_MOV = f"pisid_mazemovm_{N_JOGADOR}"
+TOPIC_SOM = f"pisid_mazesoundm_{N_JOGADOR}"
+TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
 
