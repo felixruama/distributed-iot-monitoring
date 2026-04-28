@@ -1,7 +1,4 @@
-DROP PROCEDURE IF EXISTS SP_EditarPerfil;
-
 DELIMITER $$
-
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_EditarPerfil`(
     IN p_id_utilizador INT,
     IN p_nome VARCHAR(100),
@@ -39,5 +36,4 @@ BEGIN
         WHERE IDUtilizador = p_id_utilizador;
     END IF;
 END$$
-
 DELIMITER ;
