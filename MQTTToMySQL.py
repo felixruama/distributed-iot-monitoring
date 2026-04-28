@@ -7,9 +7,9 @@ import paho.mqtt.client as mqtt
 N_JOGADOR = 7
 MYSQL_CONFIG = {
     'user': 'root',
-    'password': '',
+    'password': 'root', #METER NO ENV
     'host': 'localhost',
-    'database': 'pisid_db'  # Ajusta para o nome exato da vossa BD
+    'database': 'labirinto_db'
 }
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
@@ -21,97 +21,181 @@ TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
 
-# Estado Global (usado apenas para o bloco atual)
+# Estado Global
 last_inserted_id = None
+db_conn = None
+db_cursor = None
+id_simulacao_atual = None
 
+# Dicionários para guardar os dois tipos de limites
+limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None} # Da BD Local
+limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None} # Da Nuvem
 
-def get_db_connection():
-    return mysql.connector.connect(**MYSQL_CONFIG)
+def carregar_limites_nuvem():
+    global limites_termino
+    try:
+        print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
+        #METER NO ENV
+        nuvem_conn = mysql.connector.connect(
+            host="194.210.86.10", user="aluno", password="aluno", database="maze"
+        )
+        cursor = nuvem_conn.cursor(dictionary=True)
+        cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM SetupMaze LIMIT 1")
+        resultado = cursor.fetchone()
 
+        if resultado:
+            t_normal = float(resultado['normaltemperature'])
+            s_normal = float(resultado['normalnoise'])
+
+            # Calcula os limites absolutos em que o labirinto fecha
+            limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
+            limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
+            limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
+
+            print(f"[NUVEM] Limites de FIM DE JOGO: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
+
+        cursor.close()
+        nuvem_conn.close()
+    except Exception as e:
+        print(f"[ERRO NUVEM] Falha ao carregar limites de término: {e}")
+
+def manter_conexao_viva():
+    global db_conn, db_cursor
+    if db_conn is None or not db_conn.is_connected():
+        try:
+            print("[DB LOCAL] A estabelecer ligação persistente com MySQL...")
+            db_conn = mysql.connector.connect(**MYSQL_CONFIG)
+            db_cursor = db_conn.cursor()
+        except mysql.connector.Error as err:
+            print(f"[ERRO DB LOCAL] Não foi possível ligar: {err}")
+            return False
+    return True
+
+def procurar_simulacao_ativa():
+    global id_simulacao_atual, limites_alerta
+    if not manter_conexao_viva(): return
+    try:
+        # Pega no ID e nos limites DE ALERTA definidos pelo utilizador
+        db_cursor.execute("SELECT IDSimulacao, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta FROM simulacao WHERE Estado = '1' LIMIT 1")
+        resultado = db_cursor.fetchone()
+
+        if resultado:
+            id_simulacao_atual = resultado[0]
+            limites_alerta['temp_max'] = float(resultado[1]) if resultado[1] else None
+            limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
+            limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
+            print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
+        else:
+            print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
+            id_simulacao_atual = None
+    except Exception as e:
+        print(f"[ERRO] Falha ao procurar simulação: {e}")
 
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC2 Ligado (Código: {rc})")
-    client.subscribe([(TOPIC_MOV, 2), (TOPIC_TEMP, 1), (TOPIC_SOM, 1), (TOPIC_PING, 2)])
-
+    client.subscribe([(TOPIC_MOV, 2), (TOPIC_TEMP, 0), (TOPIC_SOM, 0), (TOPIC_PING, 2)])
 
 def on_message(client, userdata, msg):
-    global last_inserted_id
+    global last_inserted_id, id_simulacao_atual
+
+    if not manter_conexao_viva(): return
+    if id_simulacao_atual is None:
+        procurar_simulacao_ativa()
+        if id_simulacao_atual is None: return
+
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
-        conn = get_db_connection()
-        cursor = conn.cursor()
 
-        # 1. TRATAMENTO DOS MOVIMENTOS (BLOCO)
+        # 1. TRATAMENTO DOS MOVIMENTOS
         if msg.topic == TOPIC_MOV:
-            print(f"\n[MOV] Recebido bloco de {len(payload)} registos.")
             for mov in payload:
                 try:
-                    # Chamar a vossa Stored Procedure
-                    cursor.callproc('SP_RegistarPassagem', [
-                        1,  # id_simulacao
-                        mov['Marsami'],
-                        mov['RoomOrigin'],
-                        mov['RoomDestiny'],
-                        mov['Status'],
-                        mov['_id']
+                    db_cursor.callproc('SP_RegistarPassagem', [
+                        id_simulacao_atual, mov['Marsami'], mov['RoomOrigin'],
+                        mov['RoomDestiny'], mov['Status'], mov['_id']
                     ])
                     last_inserted_id = mov['_id']
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
-                    # Para o loop se der erro num registo.
-                    # Garante que não ficam "buracos" no meio do bloco.
                     break
 
-            conn.commit()
-
-            # Enviar ACK normal após gravar o bloco
+            db_conn.commit()
             ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": 1}
             client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
-            print(f"[ACK] Enviado para o bloco. Último sucesso guardado: {last_inserted_id}")
 
-        # 2. TRATAMENTO DO PING ("DID YOU GET IT?")
+        # 2. TRATAMENTO DO PING
         elif msg.topic == TOPIC_PING:
-            print(f"\n[PING] Pedido de handshake recebido do S1. A consultar a BD...")
-            try:
-                # OTIMIZAÇÃO: O S2 vai sempre ler a base de dados em vez da RAM para responder!
-                # ATENÇÃO: Confirma se o nome da tabela é "medicoespassagens" e a coluna do Mongo é "IDMongo"
-                cursor.execute("SELECT IDMongo FROM medicoespassagens ORDER BY IDMedicao DESC LIMIT 1")
-                resultado = cursor.fetchone()
+            db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
+            resultado = db_cursor.fetchone()
+            ack_payload = {"Player": N_JOGADOR, "last_id": resultado[0] if resultado else None, "status": 1}
+            client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
 
-                # Se houver registos, pega no ID; se a tabela estiver vazia, devolve None
-                id_real_na_bd = resultado[0] if resultado else None
-
-                print(f"[PING] A BD confirmou que o último ID gravado foi: {id_real_na_bd}")
-
-                # Responde ao S1 com a verdade absoluta da BD
-                ack_payload = {"Player": N_JOGADOR, "last_id": id_real_na_bd, "status": 1}
-                client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
-
-            except mysql.connector.Error as err:
-                print(f"[ERRO BD PING] {err}")
-
-        # 3. TRATAMENTO DE ALERTAS (SOM E TEMPERATURA)
+        # insercao de som e temperatura e registo de alertas/terminar a simulacao
         elif msg.topic in [TOPIC_TEMP, TOPIC_SOM]:
-            val = payload.get('Temperature') or payload.get('Sound')
+            val = float(payload.get('Temperature') or payload.get('Sound'))
+            hora_sensor = payload.get('Hour') # A hora exata da leitura do sensor
             sensor_type = 'T' if 'Temperature' in payload else 'S'
 
-            # Delega tudo para a SP_RegistarAlerta
-            cursor.callproc('SP_RegistarAlerta', [1, sensor_type, val, 0])
-            conn.commit()
-            print(f"[SENSOR] Registo de alerta processado ({sensor_type}): {val}")
+            is_alerta = False
+            is_terminar = False
 
-        cursor.close()
-        conn.close()
+            tipo_alerta = ""
+            texto_mensagem = ""
+
+            if sensor_type == 'T':
+                db_cursor.execute("INSERT INTO temperatura (Hora, Temperatura) VALUES (%s, %s)", (hora_sensor, val))
+
+                if limites_alerta['temp_max'] is not None and val > limites_alerta['temp_max']:
+                    is_alerta = True
+                    tipo_alerta = "Temperatura Máxima"
+                    texto_mensagem = f"Atenção! A temperatura atingiu {val}ºC."
+                elif limites_alerta['temp_min'] is not None and val < limites_alerta['temp_min']:
+                    is_alerta = True
+                    tipo_alerta = "Temperatura Mínima"
+                    texto_mensagem = f"Atenção! A temperatura desceu para {val}ºC."
+
+                if limites_termino['temp_max'] is not None and (val > limites_termino['temp_max'] or val < limites_termino['temp_min']):
+                    is_terminar = True
+
+            else:
+                db_cursor.execute("INSERT INTO som (Hora, Som) VALUES (%s, %s)", (hora_sensor, val))
+
+                if limites_alerta['som_max'] is not None and val > limites_alerta['som_max']:
+                    is_alerta = True
+                    tipo_alerta = "Ruído Máximo"
+                    texto_mensagem = f"Atenção! O nível de ruído atingiu {val}dB."
+
+                if limites_termino['som_max'] is not None and val > limites_termino['som_max']:
+                    is_terminar = True
+
+            if is_alerta:
+                db_cursor.callproc('SP_RegistarAlerta', [
+                    id_simulacao_atual,
+                    sensor_type,
+                    val,
+                    0, # Sala VER
+                    tipo_alerta,
+                    texto_mensagem,
+                    hora_sensor
+                ])
+
+            if is_terminar:
+                db_cursor.callproc('SP_TerminarSimulacao', [id_simulacao_atual])
+                print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
+                id_simulacao_atual = None
+
+            db_conn.commit()
 
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Falha na receção/processamento: {e}")
+        print(f"[ERRO CRÍTICO] {e}")
 
-
-# Inicialização do Cliente
 mqtt_client = mqtt.Client(client_id=f"Grupo7_PC2_Monitor", clean_session=False)
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
-print("--- PC2: Monitor de Migração Ativo (Versão Otimizada BD) ---")
+carregar_limites_nuvem()
+procurar_simulacao_ativa()
+
+print("--- PC2: Monitor de Migração Ativo (Versão Final com Nuvem e BD Local) ---")
 mqtt_client.loop_forever()

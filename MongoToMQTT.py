@@ -112,7 +112,6 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                         print(f"[ANOMALIA TIPO] Lixo detetado em {col_name}: O valor '{valor}' não é numérico!")
 
                     # TRATAR OUTLIERS ( média das últimas 5 medições)
-                    #!!!!FALTA TRATAR DO 1º, PEGAR VALOR DA NUVEM!!!!!!
                     if not e_anomalia:
                         lista_historico = historico_som if col_name == "Som" else historico_temp
 
@@ -160,6 +159,7 @@ def processar_som_temperatura_sec(): #nossa thread secundária
 
 # --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
 def processar_movimentos_main(): #nosso ciclo main
+    #FALTA VALIDAR OS MOVIMENTOS
     global last_ack_id
     print("--- Início da Migração de Movimentos por Blocos com Handshake ---")
 
