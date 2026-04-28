@@ -1,0 +1,489 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.3
+-- https://www.phpmyadmin.net/
+--
+-- Host: mysql
+-- Tempo de geração: 28/04/2026 às 12:56
+-- Versão do servidor: 8.0.46
+-- Versão do PHP: 8.3.30
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- Banco de dados: `labirinto_db_final1`
+--
+
+DELIMITER $$
+--
+-- Procedimentos
+--
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_EditarNome` (IN `p_EmailAlvo` VARCHAR(50) CHARSET utf8mb4 COLLATE utf8mb4_general_ci, IN `p_NovoNome` VARCHAR(100) CHARSET utf8mb4 COLLATE utf8mb4_general_ci)   BEGIN
+    IF p_NovoNome IS NULL OR LENGTH(TRIM(p_NovoNome)) < 3 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Erro de Validação: O nome deve ter pelo menos 3 caracteres.';
+        
+
+    ELSEIF USER() NOT LIKE CONCAT(p_EmailAlvo, '@%') COLLATE utf8mb4_general_ci THEN
+        
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Erro de Segurança: Não tens permissão para editar o nome de outra conta!';
+        
+    ELSE
+        UPDATE utilizador 
+        SET Nome = TRIM(p_NovoNome) 
+        WHERE Email = p_EmailAlvo;
+        
+        IF ROW_COUNT() = 0 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Utilizador não encontrado ou o nome introduzido já é o atual.';
+        ELSE
+            SELECT 'SUCESSO: O nome foi alterado com sucesso!' AS Resultado;
+        END IF;
+        
+    END IF;
+END$$
+
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_EditarPerfil` (IN `p_id_utilizador` INT, IN `p_nome` VARCHAR(100), IN `p_telemovel` VARCHAR(12), IN `p_email` VARCHAR(50), IN `p_datanascimento` DATE, IN `p_equipa` INT, IN `p_password` VARCHAR(255))   BEGIN
+    DECLARE v_email_da_conta VARCHAR(50);
+    
+    -- 1. Procurar o email da conta que se quer editar
+    SELECT Email INTO v_email_da_conta FROM utilizador WHERE IDUtilizador = p_id_utilizador;
+
+    -- 2. A TRANCA DE SEGURANÇA
+    IF USER() NOT LIKE CONCAT(v_email_da_conta, '@%') AND USER() NOT LIKE 'root@%' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Acesso Negado: Não tem permissão para editar o perfil de outro utilizador.';
+    ELSE
+        -- 3. UPDATE COM PROTEÇÃO DE PASSWORD
+        UPDATE utilizador
+        SET 
+            Nome = CASE WHEN p_nome IS NULL OR p_nome = '' THEN Nome ELSE p_nome END,
+            Email = CASE WHEN p_email IS NULL OR p_email = '' THEN Email ELSE p_email END,
+            Equipa = CASE WHEN p_equipa IS NULL OR p_equipa <= 0 THEN Equipa ELSE p_equipa END,
+            
+            -- LÓGICA DA PASSWORD: Se vier nula ou vazia, mantém a antiga!
+            Password = CASE WHEN p_password IS NULL OR p_password = '' THEN Password ELSE p_password END,
+            
+            Telemovel = CASE WHEN p_telemovel IS NULL THEN Telemovel WHEN p_telemovel = '' THEN NULL ELSE p_telemovel END,
+            
+            -- Voltamos à data válida para evitar o bloqueio do motor MySQL
+            DataNascimento = CASE WHEN p_datanascimento IS NULL THEN DataNascimento WHEN p_datanascimento = '1000-01-01' THEN NULL ELSE p_datanascimento END
+        WHERE IDUtilizador = p_id_utilizador;
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `corredor`
+--
+
+CREATE TABLE `corredor` (
+  `IDCorredor` int NOT NULL,
+  `Aberto` tinyint(1) NOT NULL,
+  `IDSalaA` int NOT NULL,
+  `IDSalaB` int NOT NULL,
+  `IDSimulacao` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `historico_medicoespassagens`
+--
+
+CREATE TABLE `historico_medicoespassagens` (
+  `IDMedicao` int NOT NULL,
+  `Hora` timestamp NULL DEFAULT NULL,
+  `SalaOrigem` int NOT NULL,
+  `SalaDestino` int NOT NULL,
+  `IDMarsami` int NOT NULL,
+  `Status` int NOT NULL,
+  `IDSimulacao` int NOT NULL,
+  `IDMongo` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `historico_ocupacaolabirinto`
+--
+
+CREATE TABLE `historico_ocupacaolabirinto` (
+  `NumeroMarsamisOdd` int NOT NULL,
+  `NumeroMarsamisEven` int NOT NULL,
+  `Sala` int NOT NULL,
+  `IDSimulacao` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `historico_simulacao`
+--
+
+CREATE TABLE `historico_simulacao` (
+  `IDSimulacao` int NOT NULL,
+  `Descricao` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Equipa` int NOT NULL,
+  `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `SimulacaoIniciada` tinyint(1) NOT NULL,
+  `Pontos` int NOT NULL,
+  `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
+  `TempMinAlerta` decimal(6,2) DEFAULT NULL,
+  `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
+  `Periodicidade` int DEFAULT NULL,
+  `SegundosIntervaloAlertas` int DEFAULT '60',
+  `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
+  `Estado` enum('0','1','2') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Criador` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `marsami`
+--
+
+CREATE TABLE `marsami` (
+  `IDMarsami` int NOT NULL,
+  `Cansado` tinyint(1) NOT NULL,
+  `IDSala` int NOT NULL,
+  `IDSimulacao` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `medicoespassagens`
+--
+
+CREATE TABLE `medicoespassagens` (
+  `IDMedicao` int NOT NULL,
+  `Hora` timestamp NULL DEFAULT NULL,
+  `SalaOrigem` int NOT NULL,
+  `SalaDestino` int NOT NULL,
+  `IDMarsami` int NOT NULL,
+  `Status` int NOT NULL,
+  `IDSimulacao` int NOT NULL,
+  `IDMongo` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `mensagens`
+--
+
+CREATE TABLE `mensagens` (
+  `ID` int NOT NULL,
+  `Hora` timestamp NULL DEFAULT NULL,
+  `Sala` int NOT NULL,
+  `Sensor` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Leitura` decimal(6,2) NOT NULL,
+  `TipoAlerta` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Msg` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `HoraEscrita` timestamp NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `ocupacaolabirinto`
+--
+
+CREATE TABLE `ocupacaolabirinto` (
+  `NumeroMarsamisOdd` int NOT NULL,
+  `NumeroMarsamisEven` int NOT NULL,
+  `Sala` int NOT NULL,
+  `IDSimulacao` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `sala`
+--
+
+CREATE TABLE `sala` (
+  `IDSala` int NOT NULL,
+  `nGatilhos` int NOT NULL,
+  `IDSimulacao` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `simulacao`
+--
+
+CREATE TABLE `simulacao` (
+  `IDSimulacao` int NOT NULL,
+  `Descricao` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Equipa` int NOT NULL,
+  `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `SimulacaoIniciada` tinyint(1) NOT NULL,
+  `Pontos` decimal(6,1) DEFAULT NULL,
+  `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
+  `TempMinAlerta` decimal(6,2) DEFAULT NULL,
+  `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
+  `Periodicidade` int DEFAULT NULL,
+  `SegundosIntervaloAlertas` int DEFAULT '60',
+  `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
+  `Estado` enum('0','1','2') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Criador` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `som`
+--
+
+CREATE TABLE `som` (
+  `IDSom` int NOT NULL,
+  `Hora` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `Som` decimal(6,2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `temperatura`
+--
+
+CREATE TABLE `temperatura` (
+  `IDTemperatura` int NOT NULL,
+  `Hora` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `Temperatura` decimal(6,2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `utilizador`
+--
+
+CREATE TABLE `utilizador` (
+  `IDUtilizador` int NOT NULL,
+  `Password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Nome` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Telemovel` varchar(12) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `Tipo` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `Email` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `DataNascimento` date DEFAULT NULL,
+  `Equipa` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Despejando dados para a tabela `utilizador`
+--
+
+INSERT INTO `utilizador` (`IDUtilizador`, `Password`, `Nome`, `Telemovel`, `Tipo`, `Email`, `DataNascimento`, `Equipa`) VALUES
+(1, '', 'Ana Mariaa', NULL, '', 'ana@email.com', NULL, 0),
+(2, '', 'Bruno Ramos', NULL, '', 'bruno@email.com', NULL, 0),
+(3, '', 'Utilizador PHP 1', NULL, 'web', 'user1_php', NULL, 1),
+(4, '', 'Utilizador PHP 2', NULL, 'web', 'user2_php', NULL, 2),
+(5, '', 'User PHP', NULL, 'adm', 'user_php', NULL, 0);
+
+--
+-- Índices para tabelas despejadas
+--
+
+--
+-- Índices de tabela `corredor`
+--
+ALTER TABLE `corredor`
+  ADD PRIMARY KEY (`IDCorredor`),
+  ADD KEY `fk_corredor_simulacao` (`IDSimulacao`),
+  ADD KEY `fk_corredor_salaB` (`IDSalaB`),
+  ADD KEY `fk_corredor_salaA` (`IDSalaA`);
+
+--
+-- Índices de tabela `historico_medicoespassagens`
+--
+ALTER TABLE `historico_medicoespassagens`
+  ADD PRIMARY KEY (`IDMedicao`,`IDSimulacao`),
+  ADD KEY `fk_passagens_simulacao` (`IDSimulacao`),
+  ADD KEY `fk_passagens_salaO` (`SalaOrigem`),
+  ADD KEY `fk_passagens_salaD` (`SalaDestino`),
+  ADD KEY `fk_passagens_marsami` (`IDMarsami`);
+
+--
+-- Índices de tabela `historico_ocupacaolabirinto`
+--
+ALTER TABLE `historico_ocupacaolabirinto`
+  ADD PRIMARY KEY (`Sala`,`IDSimulacao`),
+  ADD KEY `fk_ocupacao_sala` (`Sala`),
+  ADD KEY `fk_ocupacao_simulacao` (`IDSimulacao`);
+
+--
+-- Índices de tabela `historico_simulacao`
+--
+ALTER TABLE `historico_simulacao`
+  ADD PRIMARY KEY (`IDSimulacao`),
+  ADD KEY `simulacao_criador` (`Criador`);
+
+--
+-- Índices de tabela `marsami`
+--
+ALTER TABLE `marsami`
+  ADD PRIMARY KEY (`IDMarsami`),
+  ADD KEY `fk_marsami_simulacao` (`IDSimulacao`),
+  ADD KEY `fk_marsami_sala` (`IDSala`);
+
+--
+-- Índices de tabela `medicoespassagens`
+--
+ALTER TABLE `medicoespassagens`
+  ADD PRIMARY KEY (`IDMedicao`),
+  ADD KEY `fk_passagens_simulacao` (`IDSimulacao`),
+  ADD KEY `fk_passagens_salaO` (`SalaOrigem`),
+  ADD KEY `fk_passagens_salaD` (`SalaDestino`),
+  ADD KEY `fk_passagens_marsami` (`IDMarsami`);
+
+--
+-- Índices de tabela `mensagens`
+--
+ALTER TABLE `mensagens`
+  ADD PRIMARY KEY (`ID`),
+  ADD KEY `fk_mensagens_sala` (`Sala`);
+
+--
+-- Índices de tabela `ocupacaolabirinto`
+--
+ALTER TABLE `ocupacaolabirinto`
+  ADD PRIMARY KEY (`Sala`,`IDSimulacao`),
+  ADD KEY `fk_ocupacao_sala` (`Sala`),
+  ADD KEY `fk_ocupacao_simulacao` (`IDSimulacao`);
+
+--
+-- Índices de tabela `sala`
+--
+ALTER TABLE `sala`
+  ADD PRIMARY KEY (`IDSala`),
+  ADD KEY `fk_sala_simulacao` (`IDSimulacao`);
+
+--
+-- Índices de tabela `simulacao`
+--
+ALTER TABLE `simulacao`
+  ADD PRIMARY KEY (`IDSimulacao`),
+  ADD KEY `simulacao_criador` (`Criador`);
+
+--
+-- Índices de tabela `som`
+--
+ALTER TABLE `som`
+  ADD PRIMARY KEY (`IDSom`);
+
+--
+-- Índices de tabela `temperatura`
+--
+ALTER TABLE `temperatura`
+  ADD PRIMARY KEY (`IDTemperatura`);
+
+--
+-- Índices de tabela `utilizador`
+--
+ALTER TABLE `utilizador`
+  ADD PRIMARY KEY (`IDUtilizador`),
+  ADD UNIQUE KEY `Email` (`Email`);
+
+--
+-- AUTO_INCREMENT para tabelas despejadas
+--
+
+--
+-- AUTO_INCREMENT de tabela `medicoespassagens`
+--
+ALTER TABLE `medicoespassagens`
+  MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT de tabela `mensagens`
+--
+ALTER TABLE `mensagens`
+  MODIFY `ID` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT de tabela `som`
+--
+ALTER TABLE `som`
+  MODIFY `IDSom` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT de tabela `temperatura`
+--
+ALTER TABLE `temperatura`
+  MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT;
+
+--
+-- Restrições para tabelas despejadas
+--
+
+--
+-- Restrições para tabelas `corredor`
+--
+ALTER TABLE `corredor`
+  ADD CONSTRAINT `fk_corredor_salaA` FOREIGN KEY (`IDSalaA`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_corredor_salaB` FOREIGN KEY (`IDSalaB`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_corredor_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Restrições para tabelas `marsami`
+--
+ALTER TABLE `marsami`
+  ADD CONSTRAINT `fk_marsami_sala` FOREIGN KEY (`IDSala`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_marsami_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Restrições para tabelas `medicoespassagens`
+--
+ALTER TABLE `medicoespassagens`
+  ADD CONSTRAINT `fk_passagens_marsami` FOREIGN KEY (`IDMarsami`) REFERENCES `marsami` (`IDMarsami`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_passagens_salaD` FOREIGN KEY (`SalaDestino`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_passagens_salaO` FOREIGN KEY (`SalaOrigem`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_passagens_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Restrições para tabelas `mensagens`
+--
+ALTER TABLE `mensagens`
+  ADD CONSTRAINT `fk_mensagens_sala` FOREIGN KEY (`Sala`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+--
+-- Restrições para tabelas `ocupacaolabirinto`
+--
+ALTER TABLE `ocupacaolabirinto`
+  ADD CONSTRAINT `fk_ocupacao_sala` FOREIGN KEY (`Sala`) REFERENCES `sala` (`IDSala`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  ADD CONSTRAINT `fk_ocupacao_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+--
+-- Restrições para tabelas `sala`
+--
+ALTER TABLE `sala`
+  ADD CONSTRAINT `fk_sala_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+--
+-- Restrições para tabelas `simulacao`
+--
+ALTER TABLE `simulacao`
+  ADD CONSTRAINT `simulacao_criador` FOREIGN KEY (`Criador`) REFERENCES `utilizador` (`IDUtilizador`) ON UPDATE CASCADE;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
