@@ -130,16 +130,23 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                             if len(lista_historico) > 5:
                                 lista_historico.pop(0)
 
-                    # 3. REGISTO E ENVIO (Igual ao anterior)
-                    if e_anomalia or e_outlier:
+                    # REGISTO E ENVIO (Igual ao anterior)
+                    if e_anomalia:
                         db[col_name].update_one(
                             {"_id": doc_id},
-                            {"$set": { "isOutlier": True, "Anomalia": True}}
+                            {"$set": {"Anomalia": True}}
+                        )
+                        continue # Interrompe aqui para este 'doc' e passa ao próximo
+
+                    if e_outlier:
+                        db[col_name].update_one(
+                            {"_id": doc_id},
+                            {"$set": {"isOutlier": True}}
                         )
                         continue
 
                     payload = {**doc, "_id": str(doc_id)}
-                    resultado = mqtt_client.publish(topic, json.dumps(payload), qos=0)
+                    mqtt_client.publish(topic, json.dumps(payload), qos=0)
 
                     db[col_name].update_one(
                         {"_id": doc_id},
