@@ -1,0 +1,34 @@
+DELIMITER $$
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_EditarPerfil`(
+    IN p_id_utilizador INT,
+    IN p_nome VARCHAR(100),
+    IN p_telemovel VARCHAR(12),
+    IN p_email VARCHAR(50),
+    IN p_datanascimento DATE,
+    IN p_equipa INT
+)
+BEGIN
+    DECLARE v_email_da_conta VARCHAR(50);
+    
+    -- 1. Procurar o email da conta que se quer editar
+    SELECT Email INTO v_email_da_conta FROM utilizador WHERE IDUtilizador = p_id_utilizador;
+
+    -- 2. A TRANCA DE SEGURANÇA (Igual à vossa SP_EditarNome)
+    -- Verifica se o utilizador do MySQL (USER()) condiz com o email da conta 
+    -- OU se é o root (administrador do sistema)
+    IF USER() NOT LIKE CONCAT(v_email_da_conta, '@%') AND USER() NOT LIKE 'root@%' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Acesso Negado: Não tem permissão para editar o perfil de outro utilizador.';
+    ELSE
+        -- 3. Se passar a tranca, faz o UPDATE (Lógica que já testámos)
+        UPDATE utilizador
+        SET 
+            Nome = CASE WHEN p_nome IS NULL OR p_nome = '' THEN Nome ELSE p_nome END,
+            Email = CASE WHEN p_email IS NULL OR p_email = '' THEN Email ELSE p_email END,
+            Equipa = CASE WHEN p_equipa IS NULL OR p_equipa <= 0 THEN Equipa ELSE p_equipa END,
+            Telemovel = CASE WHEN p_telemovel IS NULL THEN Telemovel WHEN p_telemovel = '' THEN NULL ELSE p_telemovel END,
+            DataNascimento = CASE WHEN p_datanascimento IS NULL THEN DataNascimento WHEN p_datanascimento = '1000-01-01' THEN NULL ELSE p_datanascimento END
+        WHERE IDUtilizador = p_id_utilizador;
+    END IF;
+END$$
+DELIMITER ;
