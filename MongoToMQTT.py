@@ -5,6 +5,7 @@ import threading
 from dotenv import load_dotenv
 from pymongo import MongoClient
 import paho.mqtt.client as mqtt
+import mysql.connector
 
 load_dotenv() #Vai ler as passwords e IPs escondidos no ficheiro .env (segurança)
 
@@ -17,9 +18,9 @@ MQTT_PORT = 1883
 BATCH_SIZE = 10  # Tamanho do bloco de movimentos --(10 moviemntos)--> MQTT
 
 # Tópicos
-TOPIC_MOV = f"pisid_mazemov_{N_JOGADOR}"
-TOPIC_SOM = f"pisid_mazesound_{N_JOGADOR}"
-TOPIC_TEMP = f"pisid_mazetemp_{N_JOGADOR}"
+TOPIC_MOV = f"pisid_mazemovm_{N_JOGADOR}"
+TOPIC_SOM = f"pisid_mazesoundm_{N_JOGADOR}"
+TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
@@ -66,7 +67,7 @@ mqtt_client.loop_start()#cria uma via paralela, fica a escutar em uma thread bac
 db = MongoClient(MONGO_URI)[MONGO_DB]# Ligar ao MongoDB
 
 
-# Listas para guardar as últimas 5 medições (A vossa lógica da Pág. 13)
+# Listas para guardar as últimas 5 medições
 historico_som = []
 historico_temp = []
 
@@ -138,19 +139,17 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                         continue
 
                     payload = {**doc, "_id": str(doc_id)}
-                    resultado = mqtt_client.publish(topic, json.dumps(payload), qos=1)
-                    resultado.wait_for_publish()#espera o resultado: se chegou bem ao MQTT
+                    resultado = mqtt_client.publish(topic, json.dumps(payload), qos=0)
 
                     db[col_name].update_one(
                         {"_id": doc_id},
-                        {"$set": {"Migrado": True}} #100% de certeza que o dado está são e salvo no servidor MQTT
+                        {"$set": {"Migrado": True}}
                     )
 
         except Exception as e:
             print(f"[THREAD 2] Erro: {e}")
 
         time.sleep(periodicidade)
-#parei aqui
 
 # --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
 def processar_movimentos_main(): #nosso ciclo main
@@ -177,39 +176,82 @@ def processar_movimentos_main(): #nosso ciclo main
                 ack_event.clear()
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
-                # 3. Esperar ACK ou Timeout (Pág. 111 do exemplo)
-                if ack_event.wait(timeout=5.0):
-                    # Se o PC2 confirmou o último ID do nosso bloco
-                    if last_ack_id in ids_no_bloco:
-                        # Marcar como migrados no Mongo até ao ID confirmado
-                        for doc in batch:
-                            db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
-                            if str(doc["_id"]) == last_ack_id:
-                                break
-                        print(f"[MAIN] Bloco confirmado até {last_ack_id}.")
-                        sucesso_bloco = True
-                    else:
-                        print(f"[MAIN] ACK recebido ({last_ack_id}) não pertence ao bloco atual. Reenviando...")
-                else:
-                    # 4. Timeout -> Handshake "didyougetit" (Pág. 125 do exemplo)
+                # 3. Esperar ACK normal (5 segundos)
+                recebeu_resposta = ack_event.wait(timeout=5.0)
+
+                # 4. Se falhou, Handshake "didyougetit"
+                if not recebeu_resposta:
                     print(f"[MAIN] Timeout! Perguntando ao PC2: Did you get it?")
+                    ack_event.clear()
                     ping_payload = {"Player": N_JOGADOR}
                     mqtt_client.publish(TOPIC_PING, json.dumps(ping_payload), qos=2)
 
-                    # Espera mais um pouco pela resposta do didyougetit
-                    if ack_event.wait(timeout=3.0):
-                        # Se responder ao ping, o loop 'while not sucesso_bloco' tratará a validação do ID
-                        continue
+                    # Espera pela resposta ao Ping (3 segundos)
+                    recebeu_resposta = ack_event.wait(timeout=3.0)
+
+                # 5. Avaliar o resultado (veio do ACK normal OU do Ping)
+                if recebeu_resposta:
+                    # Se o ID reportado pelo PC2 estiver no nosso bloco atual
+                    if last_ack_id in ids_no_bloco:
+                        # Marcar como migrados no Mongo ATÉ ao ID confirmado
+                        for doc in batch:
+                            db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
+                            if str(doc["_id"]) == last_ack_id:
+                                break # Para de marcar, os seguintes (se houver) falharam e vão no prox bloco
+
+                        print(f"[MAIN] Bloco confirmado até {last_ack_id}.")
+                        sucesso_bloco = True # nao quer dizer que registou todas as mensagens do bloco, as que nao foram registadas serao enviadas no proximo bloco
                     else:
-                        print("[MAIN] Sem resposta ao didyougetit. Tentando reenvio do bloco...")
+                        # O ID reportado é antigo ou None (o PC2 não conseguiu inserir nada deste bloco)
+                        print(f"[MAIN] ID ({last_ack_id}) é antigo. O bloco atual falhou a inserção. Reenviando...")
+                else:
+                    # Falhou tudo, PC2 incontactável ou broker muito lento
+                    print("[MAIN] Sem resposta ao ACK nem ao Ping. Tentando reenvio do bloco...")
 
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")
             time.sleep(5)
 
 
+def obter_valores_iniciais_nuvem():
+    try:
+        print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais...")
+        conexao_nuvem = mysql.connector.connect(
+            host="194.210.86.10",
+            user="aluno",
+            password="aluno", #FALTA METER ISTO NO ENV
+            database="maze"
+        )
+        cursor = conexao_nuvem.cursor(dictionary=True)
+
+        # Vai buscar a configuração base do labirinto
+        cursor.execute("SELECT normaltemperature, normalnoise FROM SetupMaze LIMIT 1")
+        resultado = cursor.fetchone()
+
+        if resultado:
+            temp_normal = float(resultado['normaltemperature'])
+            som_normal = float(resultado['normalnoise'])
+            print(f"[INIT] Valores base obtidos com sucesso: Temp={temp_normal}ºC, Som={som_normal}dB")
+            return som_normal, temp_normal
+        else:
+            print("[INIT] Tabela SetupMaze vazia. A assumir defaults (20.0).")
+            return 20.0, 20.0
+
+    except Exception as e:
+        print(f"[INIT] Erro ao ligar à Nuvem: {e}. A assumir defaults (20.0).")
+        return 20.0, 20.0
+    finally:
+        if 'conexao_nuvem' in locals() and conexao_nuvem.is_connected():
+            cursor.close()
+            conexao_nuvem.close()
+
+
 if __name__ == "__main__":
-    # Iniciar thread secundária para Som e Temp (Pág. 141 do exemplo)
+    som_base, temp_base = obter_valores_iniciais_nuvem()
+
+    historico_som.append(som_base)
+    historico_temp.append(temp_base)
+    # Iniciar thread secundária para Som e Temp
     t = threading.Thread(target=processar_som_temperatura_sec, daemon=True)
     t.start()
 
