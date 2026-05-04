@@ -57,6 +57,21 @@ def obter_dados_nuvem():
             conn.close()
 
 
+# ---FUNÇÃO DE TESTE ---
+def exportar_teste_json(setup, corredores):
+    dados_teste = {
+        "resumo_nuvem": setup,
+        "lista_corredores": corredores
+    }
+    try:
+        with open('teste_leitura_nuvem.json', 'w', encoding='utf-8') as f:
+            json.dump(dados_teste, f, indent=4, ensure_ascii=False)
+        print("📂 [TESTE] Dados da nuvem exportados para 'teste_leitura_nuvem.json'")
+    except Exception as e:
+        print(f"❌ [ERRO TESTE] Falha ao criar JSON: {e}")
+
+
+
 def preparar_simulacao(id_utilizador):
     setup_info, lista_corredores = obter_dados_nuvem()
     if not setup_info or not lista_corredores:
@@ -107,4 +122,8 @@ if __name__ == "__main__":
         id_u = 1
         print("[AVISO] Nenhum IDUtilizador fornecido. A usar ID=1.")
 
-    preparar_simulacao(id_u)
+    #preparar_simulacao(id_u)
+    setup_data, lista_corredores = obter_dados_nuvem()
+    if setup_data and lista_corredores:
+        # 2. Executa apenas a exportação
+        exportar_teste_json(setup_data, lista_corredores)
