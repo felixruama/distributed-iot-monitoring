@@ -3,9 +3,7 @@ import mysql.connector
 import json
 from mysql.connector import Error
 
-# ==========================================
-# CONFIGURAÇÕES
-# ==========================================
+#Configuracoes
 N_JOGADOR = 7
 MYSQL_CONFIG = {
     'user': 'root',
@@ -42,11 +40,11 @@ def obter_dados_nuvem():
         conn = mysql.connector.connect(**CONFIG_NUVEM)
         cursor = conn.cursor(dictionary=True)
 
-        # Saca total de marsamis
+        #total de marsamis
         cursor.execute("SELECT numbermarsamis FROM SetupMaze LIMIT 1")
         setup = cursor.fetchone()
 
-        # Saca lista de corredores
+        # corredores
         cursor.execute("SELECT RoomA, RoomB FROM Corridor")
         corredores = cursor.fetchall()
 
