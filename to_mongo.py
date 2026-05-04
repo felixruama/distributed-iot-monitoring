@@ -4,6 +4,7 @@ import json
 
 # CONFIGURAÇÕES DO MONGODB
 # Se estiver a ser usado o Docker, estas credenciais devem bater certo
+#MONGO_URI = "mongodb://root:root@localhost:27017/"
 MONGO_URI = "mongodb://root:root@localhost:27017/"
 DB_NAME = "sensores_db"
 
