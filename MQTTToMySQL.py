@@ -15,7 +15,6 @@ MYSQL_CONFIG = {
     'user': 'root',
     'password': 'root', #METER NO ENV
     'host': 'localhost',
-    # --- ALTERAÇÃO AQUI: Base de dados atualizada para labirinto_DB ---
     'database': 'labirinto_DB'
 }
 
@@ -25,6 +24,7 @@ TOPIC_SOM = f"pisid_mazesoundm_{N_JOGADOR}"
 TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
+TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}" # --- NOVO TÓPICO ---
 
 # Estado Global
 last_inserted_id = None
@@ -32,18 +32,14 @@ db_conn = None
 db_cursor = None
 id_simulacao_atual = None
 
-# Dicionários para guardar os dois tipos de limites
-limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None} # Da BD Local
-limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None} # Da Nuvem
+limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
+limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
 
 def carregar_limites_nuvem():
     global limites_termino
     try:
         print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
-        #METER NO ENV
-        nuvem_conn = mysql.connector.connect(
-            host="194.210.86.10", user="aluno", password="aluno", database="maze"
-        )
+        nuvem_conn = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
         cursor = nuvem_conn.cursor(dictionary=True)
         cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
         resultado = cursor.fetchone()
@@ -51,12 +47,9 @@ def carregar_limites_nuvem():
         if resultado:
             t_normal = float(resultado['normaltemperature'])
             s_normal = float(resultado['normalnoise'])
-
-            # Calcula os limites absolutos em que o labirinto fecha
             limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
             limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
             limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
-
             print(f"[NUVEM] Limites de FIM DE JOGO: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
 
         cursor.close()
@@ -80,7 +73,6 @@ def procurar_simulacao_ativa():
     global id_simulacao_atual, limites_alerta
     if not manter_conexao_viva(): return
     try:
-        # Pega no ID e nos limites DE ALERTA definidos pelo utilizador
         db_cursor.execute("SELECT IDSimulacao, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta FROM simulacao WHERE Estado = '1' LIMIT 1")
         resultado = db_cursor.fetchone()
 
@@ -100,6 +92,16 @@ def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC2 Ligado (Código: {rc})")
     client.subscribe([(TOPIC_MOV, 2), (TOPIC_TEMP, 0), (TOPIC_SOM, 0), (TOPIC_PING, 2)])
 
+    # --- ESTRATÉGIA GENIAL: Ao ligar/reiniciar, grita para a rede o último ID que tem guardado ---
+    if id_simulacao_atual is not None and manter_conexao_viva():
+        db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
+        resultado = db_cursor.fetchone()
+        ultimo_id = resultado[0] if resultado else None
+
+        resend_payload = {"Player": N_JOGADOR, "last_id": ultimo_id}
+        client.publish(TOPIC_RESEND, json.dumps(resend_payload), qos=2)
+        print(f"[RESEND] Comando de sincronização pós-boot enviado ao PC1 (Último ID: {ultimo_id})")
+
 def on_message(client, userdata, msg):
     global last_inserted_id, id_simulacao_atual
 
@@ -111,7 +113,6 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
 
-        # 1. TRATAMENTO DOS MOVIMENTOS
         if msg.topic == TOPIC_MOV:
             for mov in payload:
                 try:
@@ -128,28 +129,23 @@ def on_message(client, userdata, msg):
             ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": 1}
             client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
 
-        # 2. TRATAMENTO DO PING
         elif msg.topic == TOPIC_PING:
             db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
             resultado = db_cursor.fetchone()
             ack_payload = {"Player": N_JOGADOR, "last_id": resultado[0] if resultado else None, "status": 1}
             client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
 
-        # insercao de som e temperatura e registo de alertas/terminar a simulacao
         elif msg.topic in [TOPIC_TEMP, TOPIC_SOM]:
             val = float(payload.get('Temperature') or payload.get('Sound'))
-            hora_sensor = payload.get('Hour') # A hora exata da leitura do sensor
+            hora_sensor = payload.get('Hour')
             sensor_type = 'T' if 'Temperature' in payload else 'S'
-
             is_alerta = False
             is_terminar = False
-
             tipo_alerta = ""
             texto_mensagem = ""
 
             if sensor_type == 'T':
                 db_cursor.execute("INSERT INTO temperatura (Hora, Temperatura) VALUES (%s, %s)", (hora_sensor, val))
-
                 if limites_alerta['temp_max'] is not None and val > limites_alerta['temp_max']:
                     is_alerta = True
                     tipo_alerta = "Temperatura Máxima"
@@ -158,31 +154,19 @@ def on_message(client, userdata, msg):
                     is_alerta = True
                     tipo_alerta = "Temperatura Mínima"
                     texto_mensagem = f"Atenção! A temperatura desceu para {val}ºC."
-
                 if limites_termino['temp_max'] is not None and (val > limites_termino['temp_max'] or val < limites_termino['temp_min']):
                     is_terminar = True
-
             else:
                 db_cursor.execute("INSERT INTO som (Hora, Som) VALUES (%s, %s)", (hora_sensor, val))
-
                 if limites_alerta['som_max'] is not None and val > limites_alerta['som_max']:
                     is_alerta = True
                     tipo_alerta = "Ruído Máximo"
                     texto_mensagem = f"Atenção! O nível de ruído atingiu {val}dB."
-
                 if limites_termino['som_max'] is not None and val > limites_termino['som_max']:
                     is_terminar = True
 
             if is_alerta:
-                # --- ALTERAÇÃO AQUI: Foi removido o "0" a meio desta chamada que estragava a SP_RegistarAlerta ---
-                db_cursor.callproc('SP_RegistarAlerta', [
-                    id_simulacao_atual,
-                    sensor_type,
-                    val,
-                    tipo_alerta,
-                    texto_mensagem,
-                    hora_sensor
-                ])
+                db_cursor.callproc('SP_RegistarAlerta', [id_simulacao_atual, sensor_type, val, tipo_alerta, texto_mensagem, hora_sensor])
 
             if is_terminar:
                 db_cursor.callproc('SP_TerminarSimulacao', [id_simulacao_atual])
@@ -190,17 +174,14 @@ def on_message(client, userdata, msg):
                 id_simulacao_atual = None
 
             db_conn.commit()
-
     except Exception as e:
         print(f"[ERRO CRÍTICO] {e}")
 
-# Usa args.broker para a ligação
 mqtt_client = mqtt.Client(client_id="Grupo7_PC2_Monitor")
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 broker_address = args.broker.split(':')[0]
 broker_port = int(args.broker.split(':')[1]) if ':' in args.broker else 1883
-
 
 carregar_limites_nuvem()
 procurar_simulacao_ativa()

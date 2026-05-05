@@ -2,13 +2,13 @@ import os
 import time
 import json
 import threading
-import argparse # Importado para ler argumentos da consola
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 from pymongo import MongoClient
 import paho.mqtt.client as mqtt
 import mysql.connector
-from bson.objectid import ObjectId # <-- ADICIONA ISTO AQUI
+from bson.objectid import ObjectId
 
 
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
@@ -16,57 +16,57 @@ parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="End
 parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true", help="URI do MongoDB")
 args = parser.parse_args()
 
-# Usa args.mongo e args.broker em vez de valores fixos
 db = MongoClient(args.mongo)["sensores_db"]
 mqtt_client = mqtt.Client(client_id="Grupo7_PC1_migrador")
 
-
-# Configurações Iniciais
 N_JOGADOR = 7
-BATCH_SIZE = 10  # Tamanho do bloco de movimentos --(10 moviemntos)--> MQTT
+BATCH_SIZE = 10
 
-
-# Listas para guardar as últimas 5 medições
 historico_som = []
 historico_temp = []
 
-# Tópicos
 TOPIC_MOV = f"pisid_mazemovm_{N_JOGADOR}"
 TOPIC_SOM = f"pisid_mazesoundm_{N_JOGADOR}"
 TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
+TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}" # --- NOVO TÓPICO ---
 
-periodicidade = 1.0  # valor default caso não mandem
-MARGEM_OUTLIER_TEMP = 5.0  # Se saltar 5ºC de repente face à média, é erro do sensor
-MARGEM_OUTLIER_SOM = 20.0  # Se o som saltar 20dB de repente face à média, é erro do sensor
+periodicidade = 1.0
+MARGEM_OUTLIER_TEMP = 5.0
+MARGEM_OUTLIER_SOM = 20.0
 last_ack_id = None
-ack_event = threading.Event() #gere a espera entre on envio de movimentos e recepção de ack (semafaro) vermelho=pare=clear , verde=ande=set e wait=fica olhando para a bandeira
+ack_event = threading.Event()
+pedido_resend = False # --- FLAG GLOBAL DA TUA ESTRATÉGIA ---
 
-# Variáveis globais para validação sacadas da nuvem
 max_marsamis_global = 0
 lista_corredores_global = []
 
-# --- Aperto de mão entre S1 e MQTT ---
-def on_connect(client, userdata, flags, rc): #client-> é scrpt(S1),userdata e falgs_> é usado pela biblioteca(não importante),rc-> código que o servidor envia 0=sucesso outro número falha na ligação por motivo x
+def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] S1 Ligado ao Broker (Código: {rc})")
-    client.subscribe(TOPIC_ACK, qos=2) # subscribe no tópico pisid_response_7
-    client.subscribe(TOPIC_CONFIG, qos=2) #subscribe no tópico pisid_config_7
+    client.subscribe(TOPIC_ACK, qos=2)
+    client.subscribe(TOPIC_CONFIG, qos=2)
+    client.subscribe(TOPIC_RESEND, qos=2) # PC1 ouve o pedido de resend
 
 
-
-def on_message_back(client, userdata, msg): #nossa thread backgroud
-    global periodicidade, last_ack_id# dá autorização ao MQTT para mudar a periodicidade e o id do último ack
+def on_message_back(client, userdata, msg):
+    global periodicidade, last_ack_id, pedido_resend
     try:
-        payload = json.loads(msg.payload.decode('utf-8')) #decode transforma a mensagem de bytes para texto, json.load -->deixa mais facil para lermos
+        payload = json.loads(msg.payload.decode('utf-8'))
 
-        if msg.topic == TOPIC_ACK: #essas mensagens tem o número do player,last_id e status--> 0 (erro) e 1 (sucesso)
-            last_ack_id = payload.get("last_id")#atuliza o last_ack_id
-            ack_event.set() #verde
+        if msg.topic == TOPIC_ACK:
+            last_ack_id = payload.get("last_id")
+            ack_event.set()
             print(f"[ACK] Recebido do PC2. Último ID inserido: {last_ack_id}")
 
-        elif msg.topic == TOPIC_CONFIG:#nessa mensagem só vem a periodicidade
+        elif msg.topic == TOPIC_RESEND:
+            last_ack_id = payload.get("last_id")
+            pedido_resend = True # Ativa a tua estratégia
+            ack_event.set() # Desbloqueia o main loop imediatamente
+            print(f"[RESEND] O PC2 reiniciou! Último ID sobrevivente no MySQL: {last_ack_id}")
+
+        elif msg.topic == TOPIC_CONFIG:
             nova_periodicidade = payload.get("Periodicidade")
             if nova_periodicidade:
                 periodicidade = float(nova_periodicidade)
@@ -83,32 +83,22 @@ broker_port = int(args.broker.split(':')[1]) if ':' in args.broker else 1883
 mqtt_client.connect(broker_address, broker_port, 60)
 mqtt_client.loop_start()
 
-
 def calcular_media(lista):
     if not lista: return 0
     return sum(lista) / len(lista)
 
-def processar_som_temperatura_sec(): #nossa thread secundária
+def processar_som_temperatura_sec():
     while True:
         try:
-            filtro_crus = {
-                "Migrado": False,
-                "isOutlier": False,
-                "Anomalia": False
-            } # Pede ao Mongo APENAS o que ainda não foi migrado ou se já foi visto que é outlier/anomalia
-
+            filtro_crus = {"Migrado": False, "isOutlier": False, "Anomalia": False}
             for col_name, topic in [("Som", TOPIC_SOM), ("Temperatura", TOPIC_TEMP)]:
-                docs = list(db[col_name].find(filtro_crus).limit(50))#garantem que o Python só lê blocos de 50 leituras de cada vez.
-
+                docs = list(db[col_name].find(filtro_crus).limit(50))
                 for doc in docs:
                     doc_id = doc["_id"]
                     valor = doc.get("Sound") if col_name == "Som" else doc.get("Temperature")
                     hora = doc.get("Hour")
+                    e_anomalia, e_outlier = False, False
 
-                    e_anomalia = False
-                    e_outlier = False
-
-                    #TRATA ANOMALIAS - ver se isto da pau
                     try:
                         hora_limpa = str(hora).replace('T', ' ')[:19]
                         datetime.strptime(hora_limpa, "%Y-%m-%d %H:%M:%S")
@@ -117,74 +107,43 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                         print(f"[ANOMALIA DATA] Lixo detetado em {col_name}: Data impossível ('{hora}')!")
 
                     try:
-                        valor = float(valor) # Tenta forçar o valor a ser um número decimal
-                        #valores impossíveis:
-                        if col_name == "Som" and valor < 0:
-                            e_anomalia = True
-                            print(f"[ANOMALIA TIPO] Lixo detetado em {col_name}: O valor '{valor}' não é fisicamente possível!")
-                        elif col_name == "Temperatura" and (valor < -50 or valor > 150):
-                            e_anomalia = True
-                            print(f"[ANOMALIA TIPO] Lixo detetado em {col_name}: O valor '{valor}' não é fisicamente possível!")
-
-                    except (ValueError, TypeError): #caso seja letra ou simbolo aka não numerico
+                        valor = float(valor)
+                        if col_name == "Som" and valor < 0: e_anomalia = True
+                        elif col_name == "Temperatura" and (valor < -50 or valor > 150): e_anomalia = True
+                    except (ValueError, TypeError):
                         e_anomalia = True
-                        print(f"[ANOMALIA TIPO] Lixo detetado em {col_name}: O valor '{valor}' não é numérico!")
 
-                    # TRATAR OUTLIERS ( média das últimas 5 medições)
                     if not e_anomalia:
                         lista_historico = historico_som if col_name == "Som" else historico_temp
-
-                        # Escolhe a constante certa consoante o sensor
                         margem_tolerada = MARGEM_OUTLIER_SOM if col_name == "Som" else MARGEM_OUTLIER_TEMP
-
                         if len(lista_historico) > 0:
                             media_atual = calcular_media(lista_historico)
-                            if abs(valor - media_atual) > margem_tolerada:
-                                e_outlier = True
-                                print(f"[OUTLIER] Bloqueado! {col_name} saltou para {valor} (Média era {media_atual:.1f})")
-
+                            if abs(valor - media_atual) > margem_tolerada: e_outlier = True
                         if not e_outlier:
                             lista_historico.append(valor)
-                            if len(lista_historico) > 5:
-                                lista_historico.pop(0)
+                            if len(lista_historico) > 5: lista_historico.pop(0)
 
-                    # REGISTO E ENVIO (Igual ao anterior)
                     if e_anomalia:
-                        db[col_name].update_one(
-                            {"_id": doc_id},
-                            {"$set": {"Anomalia": True}}
-                        )
-                        continue # Interrompe aqui para este 'doc' e passa ao próximo
-
+                        db[col_name].update_one({"_id": doc_id}, {"$set": {"Anomalia": True}}); continue
                     if e_outlier:
-                        db[col_name].update_one(
-                            {"_id": doc_id},
-                            {"$set": {"isOutlier": True}}
-                        )
-                        continue
+                        db[col_name].update_one({"_id": doc_id}, {"$set": {"isOutlier": True}}); continue
 
                     payload = {**doc, "_id": str(doc_id)}
                     mqtt_client.publish(topic, json.dumps(payload), qos=0)
-
-                    db[col_name].update_one(
-                        {"_id": doc_id},
-                        {"$set": {"Migrado": True}}
-                    )
-
+                    db[col_name].update_one({"_id": doc_id}, {"$set": {"Migrado": True}})
         except Exception as e:
-            print(f"[THREAD 2] Erro: {e}")
-
+            pass
         time.sleep(periodicidade)
 
-# --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
+# --- MAIN THREAD: A TUA LÓGICA MESTRA ---
 def processar_movimentos_main():
-    global last_ack_id
-    print("--- Início da Migração de Movimentos por Blocos com Handshake ---")
+    global last_ack_id, pedido_resend
+    print("--- Início da Migração com Estratégia de Reconciliação (Sem Duplicados) ---")
 
     while True:
         try:
             filtro_mov = {"Migrado": False, "Anomalia": False}
-            batch = list(db.Movimento.find(filtro_mov).sort("Hour", 1).limit(BATCH_SIZE))
+            batch = list(db.Movimento.find(filtro_mov).sort("_id", 1).limit(BATCH_SIZE))
 
             if not batch:
                 time.sleep(periodicidade)
@@ -194,76 +153,74 @@ def processar_movimentos_main():
             for doc in batch:
                 try:
                     marsami_id = int(doc["Marsami"])
-                    origem = int(doc["RoomOrigin"])
-                    destino = int(doc["RoomDestiny"])
-
-                    if not (1 <= marsami_id <= max_marsamis_global):
-                        raise ValueError(f"Marsami ID {marsami_id} é inválido/não existe.")
-
+                    origem, destino = int(doc["RoomOrigin"]), int(doc["RoomDestiny"])
+                    if not (1 <= marsami_id <= max_marsamis_global): raise ValueError("Marsami inválido")
                     if origem != 0:
-                        corredor_valido = any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global)
-                        if not corredor_valido:
-                            raise ValueError(f"O corredor {origem}->{destino} não existe no labirinto!")
-
+                        if not any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global):
+                            raise ValueError("Corredor inválido")
                     batch_data.append({**doc, "_id": str(doc["_id"])})
-
                 except Exception as err:
-                    print(f"[ANOMALIA MOVIMENTO] Detetado lixo: {err}")
                     db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True, "Migrado": True}})
 
-            if not batch_data:
-                continue
+            if not batch_data: continue
 
             sucesso_bloco = False
 
             while not sucesso_bloco:
-                # Atualiza os IDs atuais no bloco (pode ter sido cortado num reenvio parcial)
                 ids_no_bloco = [d["_id"] for d in batch_data]
+                id_esperado = ids_no_bloco[-1] # Este é o ID que prova que o bloco todo foi entregue
 
-                print(f"[MAIN] Enviando bloco de {len(batch_data)} movimentos válidos...")
+                print(f"\n[MAIN] A publicar bloco de {len(batch_data)} movimentos...")
                 ack_event.clear()
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
-                # 3. Esperar ACK normal (aumentei para 6 segundos para dar margem à DB)
-                recebeu_resposta = ack_event.wait(timeout=6.0)
+                # Ciclo interior que só destranca quando o bloco for resolvido
+                while not sucesso_bloco:
+                    recebeu_resposta = ack_event.wait(timeout=6.0)
 
-                # 4. CICLO DE PINGS INFINITOS (Só sai daqui quando o PC2 responder)
-                while not recebeu_resposta:
-                    print("[MAIN] Timeout no ACK! A interrogar o PC2 com Ping...")
-                    ack_event.clear()
-                    ping_payload = {"Player": N_JOGADOR}
-                    mqtt_client.publish(TOPIC_PING, json.dumps(ping_payload), qos=2)
-
-                    recebeu_resposta = ack_event.wait(timeout=5.0)
-
+                    # 1. Se não recebeu resposta (PC2 demorado ou morto) -> PING
                     if not recebeu_resposta:
-                        print("[MAIN] O PC2 continua sem responder. A aguardar antes do próximo Ping...")
-                        time.sleep(2) # Dá descanso à rede antes de pingar outra vez
+                        print("[MAIN] Timeout! O PC2 está demorado. A interrogar com Ping...")
+                        ack_event.clear()
+                        mqtt_client.publish(TOPIC_PING, json.dumps({"Player": N_JOGADOR}), qos=2)
+                        continue # Volta ao inicio do while interior para ficar à espera do Ping
 
-                # 5. Avaliar o resultado agora que TEMOS resposta (do ACK ou do Ping)
-                if last_ack_id in ids_no_bloco:
-                    # Descobrir em que posição do nosso bloco está o último ID registado pelo PC2
-                    index_ultimo_registado = ids_no_bloco.index(last_ack_id)
+                    # Se o código chega aqui, é porque chegou um ACK ou um pedido de RESEND
+                    ack_event.clear()
 
-                    # Marcar no Mongo como migrados ATÉ ao índice confirmado
-                    for i in range(index_ultimo_registado + 1):
-                        doc_id = batch_data[i]["_id"]
-                        db.Movimento.update_one({"_id": ObjectId(doc_id)}, {"$set": {"Migrado": True}})
+                    # 2. CORTA-MATO: O PC2 morreu e ressuscitou a gritar RESEND!
+                    if pedido_resend:
+                        pedido_resend = False
+                        if last_ack_id in ids_no_bloco:
+                            index = ids_no_bloco.index(last_ack_id)
+                            # Marca como feito o que ele conseguiu guardar antes de morrer
+                            for i in range(index + 1):
+                                db.Movimento.update_one({"_id": ObjectId(batch_data[i]["_id"])}, {"$set": {"Migrado": True}})
 
-                    print(f"[MAIN] Confirmação recebida do PC2 até ao ID {last_ack_id}.")
+                            if index == len(batch_data) - 1:
+                                print("[MAIN] PÓS-CRASH: O PC2 já tinha guardado tudo antes de cair. Avançando...")
+                                sucesso_bloco = True
+                            else:
+                                print(f"[MAIN] PÓS-CRASH: Cortando bloco. A reenviar os {len(batch_data) - (index + 1)} itens que ele perdeu no crash...")
+                                batch_data = batch_data[index + 1:]
+                                break # Quebra o while interior para REPUBLICAR o bloco cortado
+                        else:
+                            print("[MAIN] PÓS-CRASH: O PC2 não tinha nenhum dado deste bloco. A reenviar bloco inteiro...")
+                            break # Quebra o while interior para REPUBLICAR o bloco inteiro
 
-                    # Verificar se o PC2 processou TUDO ou se crashou a meio do bloco
-                    if index_ultimo_registado == len(batch_data) - 1:
-                        print("[MAIN] O bloco inteiro foi migrado com sucesso!")
-                        sucesso_bloco = True
+                    # 3. MODO NORMAL: Avaliar as respostas do ACK e Ping
                     else:
-                        itens_em_falta = len(batch_data) - (index_ultimo_registado + 1)
-                        print(f"[MAIN] CUIDADO: Inserção parcial! O PC2 falhou os últimos {itens_em_falta} itens.")
-                        # CORTA O BLOCO: Mantém apenas os documentos que faltam processar para o próximo loop reenviar
-                        batch_data = batch_data[index_ultimo_registado + 1:]
-                else:
-                    # O last_ack_id não está neste bloco. Significa que o PC2 não inseriu NENHUM elemento deste batch.
-                    print(f"[MAIN] O PC2 reporta um ID antigo ({last_ack_id}). O bloco atual não foi inserido. A reenviar o bloco inteiro...")
+                        if last_ack_id == id_esperado:
+                            # O ID do ACK bate certo com o fim do nosso pacote = Sucesso Total
+                            for doc in batch_data:
+                                db.Movimento.update_one({"_id": ObjectId(doc["_id"])}, {"$set": {"Migrado": True}})
+                            print(f"[MAIN] SUCESSO! Bloco concluído até {last_ack_id}.")
+                            sucesso_bloco = True
+                        else:
+                            # O PC2 está vivo, mas está atrasado (o ACK recebido é antigo).
+                            print(f"[MAIN] PC2 vivo no ID {last_ack_id}, mas queremos {id_esperado}. A aguardar...")
+                            time.sleep(2)
+                            # Volta ao inicio do loop interior e espera de novo (se não houver ACK natural, ele manda Ping)
 
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")
@@ -273,49 +230,19 @@ def processar_movimentos_main():
 def obter_valores_iniciais_nuvem():
     try:
         print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
-        conexao_nuvem = mysql.connector.connect(
-            host="194.210.86.10",
-            user="aluno",
-            password="aluno", #FALTA METER ISTO NO ENV
-            database="maze"
-        )
+        conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
         cursor = conexao_nuvem.cursor(dictionary=True)
-
-        # Vai buscar a configuração base do labirinto
         cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
         resultado = cursor.fetchone()
-
-        # --- ALTERAÇÃO AQUI: Vai buscar as salas válidas para a validação de movimentos ---
         cursor.execute("SELECT Rooma, Roomb FROM corridor")
         corredores = cursor.fetchall()
-
         if resultado:
-            temp_normal = float(resultado['normaltemperature'])
-            som_normal = float(resultado['normalnoise'])
-            total_mars = int(resultado['numbermarsamis'])
-            print(f"[INIT] Valores base obtidos com sucesso: Temp={temp_normal}ºC, Som={som_normal}dB, Marsamis={total_mars}")
-            return som_normal, temp_normal, total_mars, corredores
-        else:
-            print("[INIT] Tabela setupmaze vazia. A assumir defaults.")
-            return 20.0, 20.0, 10, corredores
-
-    except Exception as e:
-        print(f"[INIT] Erro ao ligar à Nuvem: {e}. A assumir defaults.")
-        return 20.0, 20.0, 10, []
-    finally:
-        if 'conexao_nuvem' in locals() and conexao_nuvem.is_connected():
-            cursor.close()
-            conexao_nuvem.close()
-
+            return float(resultado['normalnoise']), float(resultado['normaltemperature']), int(resultado['numbermarsamis']), corredores
+        else: return 20.0, 20.0, 10, corredores
+    except Exception as e: return 20.0, 20.0, 10, []
 
 if __name__ == "__main__":
     som_base, temp_base, max_marsamis_global, lista_corredores_global = obter_valores_iniciais_nuvem()
-
-    historico_som.append(som_base)
-    historico_temp.append(temp_base)
-    # Iniciar thread secundária para Som e Temp
-    t = threading.Thread(target=processar_som_temperatura_sec, daemon=True)
-    t.start()
-
-    # Executar lógica de movimentos no Main
+    historico_som.append(som_base); historico_temp.append(temp_base)
+    threading.Thread(target=processar_som_temperatura_sec, daemon=True).start()
     processar_movimentos_main()
