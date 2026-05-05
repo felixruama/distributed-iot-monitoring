@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 import paho.mqtt.client as mqtt
 import mysql.connector
+from bson.objectid import ObjectId # <-- ADICIONA ISTO AQUI
 
 
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
@@ -247,7 +248,7 @@ def processar_movimentos_main():
                     # Marcar no Mongo como migrados ATÉ ao índice confirmado
                     for i in range(index_ultimo_registado + 1):
                         doc_id = batch_data[i]["_id"]
-                        db.Movimento.update_one({"_id": doc_id}, {"$set": {"Migrado": True}})
+                        db.Movimento.update_one({"_id": ObjectId(doc_id)}, {"$set": {"Migrado": True}})
 
                     print(f"[MAIN] Confirmação recebida do PC2 até ao ID {last_ack_id}.")
 
