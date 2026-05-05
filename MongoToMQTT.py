@@ -2,21 +2,32 @@ import os
 import time
 import json
 import threading
+import argparse # Importado para ler argumentos da consola
 from datetime import datetime
 from dotenv import load_dotenv
 from pymongo import MongoClient
 import paho.mqtt.client as mqtt
 import mysql.connector
 
-load_dotenv() #Vai ler as passwords e IPs escondidos no ficheiro .env (segurança)
+
+parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
+parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
+parser.add_argument('--mongo', type=str, default="mongodb://root:root@localhost:27017/?directConnection=true", help="URI do MongoDB")
+args = parser.parse_args()
+
+# Usa args.mongo e args.broker em vez de valores fixos
+db = MongoClient(args.mongo)["sensores_db"]
+mqtt_client = mqtt.Client(client_id="Grupo7_PC1_migrador")
+
 
 # Configurações Iniciais
 N_JOGADOR = 7
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:root@localhost:27017/")
-MONGO_DB = "sensores_db"
-MQTT_BROKER = "broker.hivemq.com"
-MQTT_PORT = 1883
 BATCH_SIZE = 10  # Tamanho do bloco de movimentos --(10 moviemntos)--> MQTT
+
+
+# Listas para guardar as últimas 5 medições
+historico_som = []
+historico_temp = []
 
 # Tópicos
 TOPIC_MOV = f"pisid_mazemovm_{N_JOGADOR}"
@@ -42,6 +53,8 @@ def on_connect(client, userdata, flags, rc): #client-> é scrpt(S1),userdata e f
     client.subscribe(TOPIC_ACK, qos=2) # subscribe no tópico pisid_response_7
     client.subscribe(TOPIC_CONFIG, qos=2) #subscribe no tópico pisid_config_7
 
+
+
 def on_message_back(client, userdata, msg): #nossa thread backgroud
     global periodicidade, last_ack_id# dá autorização ao MQTT para mudar a periodicidade e o id do último ack
     try:
@@ -60,19 +73,15 @@ def on_message_back(client, userdata, msg): #nossa thread backgroud
     except Exception as e:
         print(f"[MQTT] Erro no processamento da mensagem: {e}")
 
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message_back
 
-# Configurar Cliente MQTT
-mqtt_client = mqtt.Client(client_id=f"Grupo7_PC1_v3") #comos nos chamamos na rede (não pode ter dois nomes iguais)
-mqtt_client.on_connect = on_connect#conecta
-mqtt_client.on_message = on_message_back#fica a escutar
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60) # a cada 60 seguindo anda um ping para avisar que estou cá msm estando caaldo
-mqtt_client.loop_start()#cria uma via paralela, fica a escutar em uma thread backgroud mas ainda executa o main principal
+broker_address = args.broker.split(':')[0]
+broker_port = int(args.broker.split(':')[1]) if ':' in args.broker else 1883
 
-db = MongoClient(MONGO_URI)[MONGO_DB]# Ligar ao MongoDB
+mqtt_client.connect(broker_address, broker_port, 60)
+mqtt_client.loop_start()
 
-# Listas para guardar as últimas 5 medições
-historico_som = []
-historico_temp = []
 
 def calcular_media(lista):
     if not lista: return 0
@@ -98,7 +107,7 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                     e_anomalia = False
                     e_outlier = False
 
-                    #TRATA ANOMALIAS
+                    #TRATA ANOMALIAS - ver se isto da pau
                     try:
                         hora_limpa = str(hora).replace('T', ' ')[:19]
                         datetime.strptime(hora_limpa, "%Y-%m-%d %H:%M:%S")

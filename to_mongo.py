@@ -1,24 +1,28 @@
 import paho.mqtt.client as mqtt
 from pymongo import MongoClient
 import json
+import argparse # Importado para ler argumentos da consola
 
 # CONFIGURAÇÕES DO MONGODB
 # Se estiver a ser usado o Docker, estas credenciais devem bater certo
-MONGO_URI = "mongodb://root:root@localhost:27017/"
-DB_NAME = "sensores_db"
 
-# Ligar ao MongoDB
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client[DB_NAME]
+# CONFIGURAÇÃO DE ARGUMENTOS
+parser = argparse.ArgumentParser(description="Script: MQTT to MongoDB")
+parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
+parser.add_argument('--mongo', type=str, default="mongodb://root:root@localhost:27017/?directConnection=true", help="URI do MongoDB")
+args = parser.parse_args()
+
+# Ligar ao MongoDB usando o argumento
+mongo_client = MongoClient(args.mongo)
+db = mongo_client["sensores_db"]
+
 
 # Definir as coleções
 col_som = db["Som"]
 col_temp = db["Temperatura"]
 col_mov = db["Movimento"]
 
-# CONFIGURAÇÕES DO MQTT E FILTRO
-BROKER = "broker.hivemq.com"
-PORT = 1883
+
 
 # Tópicos do grupo (n=7)
 TOPIC_SOM = "pisid_mazesound_7"
@@ -96,13 +100,15 @@ client.on_connect = on_connect
 client.on_message = on_message
 
 print("A tentar ligar ao broker (Script 0 - Mqtt to MongoDB)...")
-client.connect(BROKER, PORT, 60) # 60 segundos de keepalive, para garantir que a ligação se mantém ativa mesmo que haja algum atraso na rede
+broker_address = args.broker.split(':')[0]
+broker_port = int(args.broker.split(':')[1]) if ':' in args.broker else 1883 #opcional passar a porta broker:port ou so broker
+
+client.connect(broker_address, broker_port, 60) # Usa o broker passado por argumento - 60 segundos de keepalive, para garantir que a ligação se mantém ativa mesmo que haja algum atraso na rede
 
 # Manter o script a correr infinitamente
 try:
     client.loop_forever()
 except KeyboardInterrupt:
-    # Se carregares em Ctrl+C na consola, ele desliga de forma limpa
     print("\nScript terminado pelo utilizador.")
     client.disconnect()
     mongo_client.close()

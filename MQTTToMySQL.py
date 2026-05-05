@@ -2,6 +2,12 @@ import os
 import json
 import mysql.connector
 import paho.mqtt.client as mqtt
+import argparse # Importado para ler argumentos da consola
+
+parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
+parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
+args = parser.parse_args()
+
 
 # Configurações Iniciais
 N_JOGADOR = 7
@@ -12,8 +18,6 @@ MYSQL_CONFIG = {
     # --- ALTERAÇÃO AQUI: Base de dados atualizada para labirinto_DB ---
     'database': 'labirinto_DB'
 }
-MQTT_BROKER = "broker.hivemq.com"
-MQTT_PORT = 1883
 
 # Tópicos
 TOPIC_MOV = f"pisid_mazemovm_{N_JOGADOR}"
@@ -190,13 +194,17 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"[ERRO CRÍTICO] {e}")
 
-mqtt_client = mqtt.Client(client_id=f"Grupo7_PC2_Monitor", clean_session=False)
+# Usa args.broker para a ligação
+mqtt_client = mqtt.Client(client_id="Grupo7_PC2_Monitor")
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+broker_address = args.broker.split(':')[0]
+broker_port = int(args.broker.split(':')[1]) if ':' in args.broker else 1883
+
 
 carregar_limites_nuvem()
 procurar_simulacao_ativa()
 
 print("--- PC2: Monitor de Migração Ativo (Versão Final com Nuvem e BD Local) ---")
+mqtt_client.connect(broker_address, broker_port, 60)
 mqtt_client.loop_forever()
