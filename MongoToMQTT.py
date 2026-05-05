@@ -11,7 +11,7 @@ load_dotenv() #Vai ler as passwords e IPs escondidos no ficheiro .env (seguranç
 
 # Configurações Iniciais
 N_JOGADOR = 7
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:root@localhost:27017/")
 MONGO_DB = "sensores_db"
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = 1883
