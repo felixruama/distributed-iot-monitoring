@@ -176,13 +176,12 @@ def processar_som_temperatura_sec(): #nossa thread secundária
         time.sleep(periodicidade)
 
 # --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
-def processar_movimentos_main(): #nosso ciclo main
+def processar_movimentos_main():
     global last_ack_id
     print("--- Início da Migração de Movimentos por Blocos com Handshake ---")
 
     while True:
         try:
-            # 1. Obter bloco de movimentos não migrados
             filtro_mov = {"Migrado": False, "Anomalia": False}
             batch = list(db.Movimento.find(filtro_mov).sort("Hour", 1).limit(BATCH_SIZE))
 
@@ -190,7 +189,6 @@ def processar_movimentos_main(): #nosso ciclo main
                 time.sleep(periodicidade)
                 continue
 
-            # --- ALTERAÇÃO AQUI: Implementação da Validação de Movimentos ---
             batch_data = []
             for doc in batch:
                 try:
@@ -198,11 +196,9 @@ def processar_movimentos_main(): #nosso ciclo main
                     origem = int(doc["RoomOrigin"])
                     destino = int(doc["RoomDestiny"])
 
-                    # Regra 1: Marsami tem de existir
                     if not (1 <= marsami_id <= max_marsamis_global):
                         raise ValueError(f"Marsami ID {marsami_id} é inválido/não existe.")
 
-                    # Regra 2: O corredor tem de existir (origem 0 é exceção pois é o limbo/arranque)
                     if origem != 0:
                         corredor_valido = any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global)
                         if not corredor_valido:
@@ -212,52 +208,61 @@ def processar_movimentos_main(): #nosso ciclo main
 
                 except Exception as err:
                     print(f"[ANOMALIA MOVIMENTO] Detetado lixo: {err}")
-                    # Assinala como anomalia para não bloquear a fila, mas fica no Mongo para histórico
                     db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True, "Migrado": True}})
 
-            # Se todos os documentos do batch eram lixo, saltar para a próxima iteração
             if not batch_data:
                 continue
 
-            ids_no_bloco = [d["_id"] for d in batch_data]
             sucesso_bloco = False
 
             while not sucesso_bloco:
+                # Atualiza os IDs atuais no bloco (pode ter sido cortado num reenvio parcial)
+                ids_no_bloco = [d["_id"] for d in batch_data]
+
                 print(f"[MAIN] Enviando bloco de {len(batch_data)} movimentos válidos...")
                 ack_event.clear()
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
-                # 3. Esperar ACK normal (5 segundos)
-                recebeu_resposta = ack_event.wait(timeout=5.0)
+                # 3. Esperar ACK normal (aumentei para 6 segundos para dar margem à DB)
+                recebeu_resposta = ack_event.wait(timeout=6.0)
 
-                # 4. Se falhou, Handshake "didyougetit"
-                if not recebeu_resposta:
-                    print(f"[MAIN] Timeout! Perguntando ao PC2: Did you get it?")
+                # 4. CICLO DE PINGS INFINITOS (Só sai daqui quando o PC2 responder)
+                while not recebeu_resposta:
+                    print("[MAIN] Timeout no ACK! A interrogar o PC2 com Ping...")
                     ack_event.clear()
                     ping_payload = {"Player": N_JOGADOR}
                     mqtt_client.publish(TOPIC_PING, json.dumps(ping_payload), qos=2)
 
-                    # Espera pela resposta ao Ping (3 segundos)
-                    recebeu_resposta = ack_event.wait(timeout=3.0)
+                    recebeu_resposta = ack_event.wait(timeout=5.0)
 
-                # 5. Avaliar o resultado (veio do ACK normal OU do Ping)
-                if recebeu_resposta:
-                    # Se o ID reportado pelo PC2 estiver no nosso bloco atual
-                    if last_ack_id in ids_no_bloco:
-                        # Marcar como migrados no Mongo ATÉ ao ID confirmado
-                        for doc in batch_data: # Corrigido para iterar sobre os válidos
-                            db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
-                            if str(doc["_id"]) == last_ack_id:
-                                break # Para de marcar, os seguintes (se houver) falharam e vão no prox bloco
+                    if not recebeu_resposta:
+                        print("[MAIN] O PC2 continua sem responder. A aguardar antes do próximo Ping...")
+                        time.sleep(2) # Dá descanso à rede antes de pingar outra vez
 
-                        print(f"[MAIN] Bloco confirmado até {last_ack_id}.")
-                        sucesso_bloco = True # nao quer dizer que registou todas as mensagens do bloco, as que nao foram registadas serao enviadas no proximo bloco
+                # 5. Avaliar o resultado agora que TEMOS resposta (do ACK ou do Ping)
+                if last_ack_id in ids_no_bloco:
+                    # Descobrir em que posição do nosso bloco está o último ID registado pelo PC2
+                    index_ultimo_registado = ids_no_bloco.index(last_ack_id)
+
+                    # Marcar no Mongo como migrados ATÉ ao índice confirmado
+                    for i in range(index_ultimo_registado + 1):
+                        doc_id = batch_data[i]["_id"]
+                        db.Movimento.update_one({"_id": doc_id}, {"$set": {"Migrado": True}})
+
+                    print(f"[MAIN] Confirmação recebida do PC2 até ao ID {last_ack_id}.")
+
+                    # Verificar se o PC2 processou TUDO ou se crashou a meio do bloco
+                    if index_ultimo_registado == len(batch_data) - 1:
+                        print("[MAIN] O bloco inteiro foi migrado com sucesso!")
+                        sucesso_bloco = True
                     else:
-                        # O ID reportado é antigo ou None (o PC2 não conseguiu inserir nada deste bloco)
-                        print(f"[MAIN] ID ({last_ack_id}) é antigo. O bloco atual falhou a inserção. Reenviando...")
+                        itens_em_falta = len(batch_data) - (index_ultimo_registado + 1)
+                        print(f"[MAIN] CUIDADO: Inserção parcial! O PC2 falhou os últimos {itens_em_falta} itens.")
+                        # CORTA O BLOCO: Mantém apenas os documentos que faltam processar para o próximo loop reenviar
+                        batch_data = batch_data[index_ultimo_registado + 1:]
                 else:
-                    # Falhou tudo, PC2 incontactável ou broker muito lento
-                    print("[MAIN] Sem resposta ao ACK nem ao Ping. Tentando reenvio do bloco...")
+                    # O last_ack_id não está neste bloco. Significa que o PC2 não inseriu NENHUM elemento deste batch.
+                    print(f"[MAIN] O PC2 reporta um ID antigo ({last_ack_id}). O bloco atual não foi inserido. A reenviar o bloco inteiro...")
 
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")
