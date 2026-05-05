@@ -9,7 +9,7 @@ import argparse # Importado para ler argumentos da consola
 # CONFIGURAÇÃO DE ARGUMENTOS
 parser = argparse.ArgumentParser(description="Script: MQTT to MongoDB")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
-parser.add_argument('--mongo', type=str, default="mongodb://root:root@localhost:27017/?directConnection=true", help="URI do MongoDB")
+parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true", help="URI do MongoDB")
 args = parser.parse_args()
 
 # Ligar ao MongoDB usando o argumento

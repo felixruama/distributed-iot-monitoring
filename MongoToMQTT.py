@@ -12,7 +12,7 @@ import mysql.connector
 
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
-parser.add_argument('--mongo', type=str, default="mongodb://root:root@localhost:27017/?directConnection=true", help="URI do MongoDB")
+parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true", help="URI do MongoDB")
 args = parser.parse_args()
 
 # Usa args.mongo e args.broker em vez de valores fixos
