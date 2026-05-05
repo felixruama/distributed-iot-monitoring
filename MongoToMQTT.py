@@ -2,6 +2,7 @@ import os
 import time
 import json
 import threading
+from datetime import datetime
 from dotenv import load_dotenv
 from pymongo import MongoClient
 import paho.mqtt.client as mqtt
@@ -92,11 +93,19 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                 for doc in docs:
                     doc_id = doc["_id"]
                     valor = doc.get("Sound") if col_name == "Som" else doc.get("Temperature")
+                    hora = doc.get("Hour")
 
                     e_anomalia = False
                     e_outlier = False
 
                     #TRATA ANOMALIAS
+                    try:
+                        hora_limpa = str(hora).replace('T', ' ')[:19]
+                        datetime.strptime(hora_limpa, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        e_anomalia = True
+                        print(f"[ANOMALIA DATA] Lixo detetado em {col_name}: Data impossível ('{hora}')!")
+
                     try:
                         valor = float(valor) # Tenta forçar o valor a ser um número decimal
                         #valores impossíveis:
