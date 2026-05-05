@@ -12,7 +12,7 @@ MYSQL_CONFIG = {
     # --- ALTERAÇÃO AQUI: Base de dados atualizada para labirinto_DB ---
     'database': 'labirinto_DB'
 }
-MQTT_BROKER = "localhost"
+MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 
 # Tópicos
@@ -41,7 +41,7 @@ def carregar_limites_nuvem():
             host="194.210.86.10", user="aluno", password="aluno", database="maze"
         )
         cursor = nuvem_conn.cursor(dictionary=True)
-        cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM SetupMaze LIMIT 1")
+        cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
         resultado = cursor.fetchone()
 
         if resultado:

@@ -37,7 +37,7 @@ def obter_dados_nuvem():
         cursor = conn.cursor(dictionary=True)
 
         # total de marsamis
-        cursor.execute("SELECT numbermarsamis FROM SetupMaze LIMIT 1")
+        cursor.execute("SELECT numbermarsamis FROM setupmaze LIMIT 1")
         setup = cursor.fetchone()
 
         # corredores

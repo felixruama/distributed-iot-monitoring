@@ -13,7 +13,7 @@ load_dotenv() #Vai ler as passwords e IPs escondidos no ficheiro .env (seguranç
 N_JOGADOR = 7
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:root@localhost:27017/")
 MONGO_DB = "sensores_db"
-MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 BATCH_SIZE = 10  # Tamanho do bloco de movimentos --(10 moviemntos)--> MQTT
 
@@ -258,7 +258,7 @@ def obter_valores_iniciais_nuvem():
         cursor = conexao_nuvem.cursor(dictionary=True)
 
         # Vai buscar a configuração base do labirinto
-        cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM SetupMaze LIMIT 1")
+        cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
         resultado = cursor.fetchone()
 
         # --- ALTERAÇÃO AQUI: Vai buscar as salas válidas para a validação de movimentos ---
@@ -272,7 +272,7 @@ def obter_valores_iniciais_nuvem():
             print(f"[INIT] Valores base obtidos com sucesso: Temp={temp_normal}ºC, Som={som_normal}dB, Marsamis={total_mars}")
             return som_normal, temp_normal, total_mars, corredores
         else:
-            print("[INIT] Tabela SetupMaze vazia. A assumir defaults.")
+            print("[INIT] Tabela setupmaze vazia. A assumir defaults.")
             return 20.0, 20.0, 10, corredores
 
     except Exception as e:
