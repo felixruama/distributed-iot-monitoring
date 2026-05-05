@@ -9,7 +9,8 @@ MYSQL_CONFIG = {
     'user': 'root',
     'password': 'root', #METER NO ENV
     'host': 'localhost',
-    'database': 'labirinto_db'
+    # --- ALTERAÇÃO AQUI: Base de dados atualizada para labirinto_DB ---
+    'database': 'labirinto_DB'
 }
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
@@ -169,11 +170,11 @@ def on_message(client, userdata, msg):
                     is_terminar = True
 
             if is_alerta:
+                # --- ALTERAÇÃO AQUI: Foi removido o "0" a meio desta chamada que estragava a SP_RegistarAlerta ---
                 db_cursor.callproc('SP_RegistarAlerta', [
                     id_simulacao_atual,
                     sensor_type,
                     val,
-                    0, # Sala VER
                     tipo_alerta,
                     texto_mensagem,
                     hora_sensor

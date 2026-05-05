@@ -31,6 +31,10 @@ MARGEM_OUTLIER_SOM = 20.0  # Se o som saltar 20dB de repente face à média, é 
 last_ack_id = None
 ack_event = threading.Event() #gere a espera entre on envio de movimentos e recepção de ack (semafaro) vermelho=pare=clear , verde=ande=set e wait=fica olhando para a bandeira
 
+# Variáveis globais para validação sacadas da nuvem
+max_marsamis_global = 0
+lista_corredores_global = []
+
 # --- Aperto de mão entre S1 e MQTT ---
 def on_connect(client, userdata, flags, rc): #client-> é scrpt(S1),userdata e falgs_> é usado pela biblioteca(não importante),rc-> código que o servidor envia 0=sucesso outro número falha na ligação por motivo x
     print(f"[MQTT] S1 Ligado ao Broker (Código: {rc})")
@@ -63,19 +67,15 @@ mqtt_client.on_message = on_message_back#fica a escutar
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60) # a cada 60 seguindo anda um ping para avisar que estou cá msm estando caaldo
 mqtt_client.loop_start()#cria uma via paralela, fica a escutar em uma thread backgroud mas ainda executa o main principal
 
-
 db = MongoClient(MONGO_URI)[MONGO_DB]# Ligar ao MongoDB
-
 
 # Listas para guardar as últimas 5 medições
 historico_som = []
 historico_temp = []
 
-
 def calcular_media(lista):
     if not lista: return 0
     return sum(lista) / len(lista)
-
 
 def processar_som_temperatura_sec(): #nossa thread secundária
     while True:
@@ -96,7 +96,7 @@ def processar_som_temperatura_sec(): #nossa thread secundária
                     e_anomalia = False
                     e_outlier = False
 
-                   #TRATA ANOMALIAS
+                    #TRATA ANOMALIAS
                     try:
                         valor = float(valor) # Tenta forçar o valor a ser um número decimal
                         #valores impossíveis:
@@ -159,7 +159,6 @@ def processar_som_temperatura_sec(): #nossa thread secundária
 
 # --- MAIN THREAD: Movimentos em Blocos com Handshake (QoS 2) ---
 def processar_movimentos_main(): #nosso ciclo main
-    #FALTA VALIDAR OS MOVIMENTOS
     global last_ack_id
     print("--- Início da Migração de Movimentos por Blocos com Handshake ---")
 
@@ -173,13 +172,40 @@ def processar_movimentos_main(): #nosso ciclo main
                 time.sleep(periodicidade)
                 continue
 
-            # 2. Preparar e enviar bloco
-            batch_data = [{**doc, "_id": str(doc["_id"])} for doc in batch]
-            ids_no_bloco = [d["_id"] for d in batch_data]
+            # --- ALTERAÇÃO AQUI: Implementação da Validação de Movimentos ---
+            batch_data = []
+            for doc in batch:
+                try:
+                    marsami_id = int(doc["Marsami"])
+                    origem = int(doc["RoomOrigin"])
+                    destino = int(doc["RoomDestiny"])
 
+                    # Regra 1: Marsami tem de existir
+                    if not (1 <= marsami_id <= max_marsamis_global):
+                        raise ValueError(f"Marsami ID {marsami_id} é inválido/não existe.")
+
+                    # Regra 2: O corredor tem de existir (origem 0 é exceção pois é o limbo/arranque)
+                    if origem != 0:
+                        corredor_valido = any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global)
+                        if not corredor_valido:
+                            raise ValueError(f"O corredor {origem}->{destino} não existe no labirinto!")
+
+                    batch_data.append({**doc, "_id": str(doc["_id"])})
+
+                except Exception as err:
+                    print(f"[ANOMALIA MOVIMENTO] Detetado lixo: {err}")
+                    # Assinala como anomalia para não bloquear a fila, mas fica no Mongo para histórico
+                    db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True, "Migrado": True}})
+
+            # Se todos os documentos do batch eram lixo, saltar para a próxima iteração
+            if not batch_data:
+                continue
+
+            ids_no_bloco = [d["_id"] for d in batch_data]
             sucesso_bloco = False
+
             while not sucesso_bloco:
-                print(f"[MAIN] Enviando bloco de {len(batch_data)} movimentos...")
+                print(f"[MAIN] Enviando bloco de {len(batch_data)} movimentos válidos...")
                 ack_event.clear()
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
@@ -201,7 +227,7 @@ def processar_movimentos_main(): #nosso ciclo main
                     # Se o ID reportado pelo PC2 estiver no nosso bloco atual
                     if last_ack_id in ids_no_bloco:
                         # Marcar como migrados no Mongo ATÉ ao ID confirmado
-                        for doc in batch:
+                        for doc in batch_data: # Corrigido para iterar sobre os válidos
                             db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Migrado": True}})
                             if str(doc["_id"]) == last_ack_id:
                                 break # Para de marcar, os seguintes (se houver) falharam e vão no prox bloco
@@ -222,7 +248,7 @@ def processar_movimentos_main(): #nosso ciclo main
 
 def obter_valores_iniciais_nuvem():
     try:
-        print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais...")
+        print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
         conexao_nuvem = mysql.connector.connect(
             host="194.210.86.10",
             user="aluno",
@@ -232,21 +258,26 @@ def obter_valores_iniciais_nuvem():
         cursor = conexao_nuvem.cursor(dictionary=True)
 
         # Vai buscar a configuração base do labirinto
-        cursor.execute("SELECT normaltemperature, normalnoise FROM SetupMaze LIMIT 1")
+        cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM SetupMaze LIMIT 1")
         resultado = cursor.fetchone()
+
+        # --- ALTERAÇÃO AQUI: Vai buscar as salas válidas para a validação de movimentos ---
+        cursor.execute("SELECT Rooma, Roomb FROM corridor")
+        corredores = cursor.fetchall()
 
         if resultado:
             temp_normal = float(resultado['normaltemperature'])
             som_normal = float(resultado['normalnoise'])
-            print(f"[INIT] Valores base obtidos com sucesso: Temp={temp_normal}ºC, Som={som_normal}dB")
-            return som_normal, temp_normal
+            total_mars = int(resultado['numbermarsamis'])
+            print(f"[INIT] Valores base obtidos com sucesso: Temp={temp_normal}ºC, Som={som_normal}dB, Marsamis={total_mars}")
+            return som_normal, temp_normal, total_mars, corredores
         else:
-            print("[INIT] Tabela SetupMaze vazia. A assumir defaults (20.0).")
-            return 20.0, 20.0
+            print("[INIT] Tabela SetupMaze vazia. A assumir defaults.")
+            return 20.0, 20.0, 10, corredores
 
     except Exception as e:
-        print(f"[INIT] Erro ao ligar à Nuvem: {e}. A assumir defaults (20.0).")
-        return 20.0, 20.0
+        print(f"[INIT] Erro ao ligar à Nuvem: {e}. A assumir defaults.")
+        return 20.0, 20.0, 10, []
     finally:
         if 'conexao_nuvem' in locals() and conexao_nuvem.is_connected():
             cursor.close()
@@ -254,7 +285,7 @@ def obter_valores_iniciais_nuvem():
 
 
 if __name__ == "__main__":
-    som_base, temp_base = obter_valores_iniciais_nuvem()
+    som_base, temp_base, max_marsamis_global, lista_corredores_global = obter_valores_iniciais_nuvem()
 
     historico_som.append(som_base)
     historico_temp.append(temp_base)
