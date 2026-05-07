@@ -18,7 +18,7 @@ if ($conn->connect_error) {
     exit;
 }
 
-$sql = "SELECT TempMaxAlerta, TempMinAlerta FROM simulacao ORDER BY IDSimulacao DESC LIMIT 1";
+$sql = "SELECT TempMaxAlerta, TempMinAlerta FROM simulacao WHERE Estado = '1' LIMIT 1";
 $result = $conn->query($sql);
 
 if ($result && $row = $result->fetch_assoc()) {

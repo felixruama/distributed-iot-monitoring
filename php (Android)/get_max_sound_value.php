@@ -2,7 +2,7 @@
 include 'db_config.php';
 
 // Vai buscar o RuidoMaxAlerta da simulação mais recente[cite: 1, 8]
-$sql = "SELECT RuidoMaxAlerta FROM simulacao ORDER BY IDSimulacao DESC LIMIT 1";
+$sql = "SELECT RuidoMaxAlerta FROM simulacao WHERE Estado = '1' LIMIT 1";
 $result = $conn->query($sql);
 
 if ($result && $result->num_rows > 0) {

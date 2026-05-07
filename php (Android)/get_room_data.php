@@ -3,7 +3,7 @@ include 'db_config.php';
 
 // Como o Java está à espera de "Sala", "NumeroMarsamisEven" e "NumeroMarsamisOdd"
 // não precisamos de dar "AS" (nomes falsos) no SELECT, usamos os nomes originais!
-$sql = "SELECT Sala, NumeroMarsamisEven, NumeroMarsamisOdd FROM ocupacaolabirinto";
+$sql = "SELECT Sala, NumeroMarsamisEven, NumeroMarsamisOdd FROM ocupacaolabirinto WHERE IDSimulacao = (SELECT IDSimulacao FROM simulacao WHERE Estado = '1' LIMIT 1)";
 
 $result = $conn->query($sql);
 $rooms = [];
