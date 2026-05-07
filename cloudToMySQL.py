@@ -6,7 +6,7 @@ from mysql.connector import Error
 # Configuracoes
 MYSQL_CONFIG = {
     'user': 'root',
-    'password': 'root', # Lembra-te de ajustar a password se necessário
+    'password': 'root', # Lembra-te de ajustar a password se necessárioo
     'host': 'localhost',
     'database': 'labirinto_DB'
 }
