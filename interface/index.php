@@ -55,6 +55,15 @@
     <footer>
         2026 PISID - MazeRun Project.
     </footer>
+<?php if (isset($_GET['erro'])): ?>
+        <script>
+            // Pega na mensagem de erro que vem no link e mostra num pop-up
+            alert("<?php echo htmlspecialchars($_GET['erro']); ?>");
+            
+            // Limpa o link lá em cima para o erro desaparecer se o utilizador fizer refresh à página
+            window.history.replaceState(null, null, window.location.pathname);
+        </script>
+    <?php endif; ?>
 
 </body>
 </html>
