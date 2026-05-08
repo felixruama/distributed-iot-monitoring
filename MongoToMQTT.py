@@ -96,15 +96,9 @@ def processar_som_temperatura_sec():
                 for doc in docs:
                     doc_id = doc["_id"]
                     valor = doc.get("Sound") if col_name == "Som" else doc.get("Temperature")
-                    hora = doc.get("Hour")
                     e_anomalia, e_outlier = False, False
 
-                    try:
-                        hora_limpa = str(hora).replace('T', ' ')[:19]
-                        datetime.strptime(hora_limpa, "%Y-%m-%d %H:%M:%S")
-                    except ValueError:
-                        e_anomalia = True
-                        print(f"[ANOMALIA DATA] Lixo detetado em {col_name}: Data impossível ('{hora}')!")
+
 
                     try:
                         valor = float(valor)

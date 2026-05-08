@@ -19,7 +19,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `labirinto_DB`
+-- Database: `labirinto_DB_ruama`
 --
 
 DELIMITER $$
@@ -77,7 +77,7 @@ ELSE
 PREPARE stmt_create FROM @sql_create; EXECUTE stmt_create; DEALLOCATE PREPARE stmt_create;
 
 -- 5. MATRIZ DE PERMISSÕES DINÂMICA
-SET @db = 'labirinto_DB';
+SET @db = 'labirinto_DB_ruama';
         SET @usr = CONCAT('''', p_Email, '''@''%''');
 
         IF p_Tipo = 'Admin' THEN
