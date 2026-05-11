@@ -10,7 +10,6 @@ import paho.mqtt.client as mqtt
 import mysql.connector
 from bson.objectid import ObjectId
 
-
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
 parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true", help="URI do MongoDB")
@@ -31,25 +30,24 @@ TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
-TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}" # --- NOVO TÓPICO ---
+TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}"
 
 periodicidade = 1.0
 MARGEM_OUTLIER_TEMP = 5.0
 MARGEM_OUTLIER_SOM = 20.0
 last_ack_id = None
-status_recebido = "OK"
+status_recebido = "OK" # <--- Variável Adicionada
 ack_event = threading.Event()
-pedido_resend = False # --- FLAG GLOBAL DA TUA ESTRATÉGIA ---
+pedido_resend = False
 
 max_marsamis_global = 0
 lista_corredores_global = []
 
 def on_connect(client, userdata, flags, rc):
-    print(f"[MQTT] S1 Ligado ao Broker (Código: {rc})")
+    print(f"[MQTT] PC1 Ligado ao Broker (Código: {rc})")
     client.subscribe(TOPIC_ACK, qos=2)
     client.subscribe(TOPIC_CONFIG, qos=2)
-    client.subscribe(TOPIC_RESEND, qos=2) # PC1 ouve o pedido de resend
-
+    client.subscribe(TOPIC_RESEND, qos=2)
 
 def on_message_back(client, userdata, msg):
     global periodicidade, last_ack_id, pedido_resend, status_recebido
@@ -58,13 +56,14 @@ def on_message_back(client, userdata, msg):
 
         if msg.topic == TOPIC_ACK:
             last_ack_id = payload.get("last_id")
+            status_recebido = payload.get("status", "OK") # <--- Apanha o estado da BD
             ack_event.set()
-            print(f"[ACK] Recebido do PC2. Último ID inserido: {last_ack_id}")
+            print(f"[ACK] Recebido do PC2. Último ID: {last_ack_id} | Status: {status_recebido}")
 
         elif msg.topic == TOPIC_RESEND:
             last_ack_id = payload.get("last_id")
-            pedido_resend = True # Ativa a tua estratégia
-            ack_event.set() # Desbloqueia o main loop imediatamente
+            pedido_resend = True
+            ack_event.set()
             print(f"[RESEND] O PC2 reiniciou! Último ID sobrevivente no MySQL: {last_ack_id}")
 
         elif msg.topic == TOPIC_CONFIG:
@@ -99,8 +98,6 @@ def processar_som_temperatura_sec():
                     valor = doc.get("Sound") if col_name == "Som" else doc.get("Temperature")
                     e_anomalia, e_outlier = False, False
 
-
-
                     try:
                         valor = float(valor)
                         if col_name == "Som" and valor < 0: e_anomalia = True
@@ -134,19 +131,20 @@ def processar_som_temperatura_sec():
 def processar_movimentos_main():
     global last_ack_id, pedido_resend
     print("--- Início da Migração com Estratégia de Reconciliação (Sem Duplicados) ---")
+
+    # =================================================================
+    # PASSO 1: HANDSHAKE INICIAL
+    # =================================================================
     print("[INIT] A iniciar Handshake de Sincronização com o PC2...")
     sync_concluido = False
     while not sync_concluido:
         ack_event.clear()
-        # ping de arranque
         mqtt_client.publish(TOPIC_PING, json.dumps({"Player": N_JOGADOR}), qos=2)
-
         recebeu_resposta = ack_event.wait(timeout=5.0)
 
         if recebeu_resposta:
             if last_ack_id is not None:
                 try:
-                    #marcar como True todos os IDs até ao last_ack_id que o PC2 enviou
                     resultado = db.Movimento.update_many(
                         {"_id": {"$lte": ObjectId(last_ack_id)}, "Migrado": False},
                         {"$set": {"Migrado": True}}
@@ -156,12 +154,15 @@ def processar_movimentos_main():
                 except Exception as e:
                     print(f"[INIT] Erro a alinhar BD no arranque: {e}")
             else:
-                print("[INIT] Handshake Concluído! O PC2 não tem registos (BD vazia para esta simulação).")
-
-            sync_concluido = True # Desbloqueia e avança para a main thread!
+                print("[INIT] Handshake Concluído! O PC2 não tem registos.")
+            sync_concluido = True
         else:
             print("[INIT] O PC2 não está a responder (ou MySQL em baixo). A tentar de novo em 5s...")
             time.sleep(5)
+
+    # =================================================================
+    # PASSO 2: LOOP DE MIGRAÇÃO
+    # =================================================================
     while True:
         try:
             filtro_mov = {"Migrado": False, "Anomalia": False}
@@ -190,68 +191,59 @@ def processar_movimentos_main():
 
             while not sucesso_bloco:
                 ids_no_bloco = [d["_id"] for d in batch_data]
-                id_esperado = ids_no_bloco[-1] # Este é o ID que prova que o bloco todo foi entregue
+                id_esperado = ids_no_bloco[-1]
 
                 print(f"\n[MAIN] A publicar bloco de {len(batch_data)} movimentos...")
                 ack_event.clear()
-                status_recebido = "OK" # Resetamos o status antes de enviar
+                status_recebido = "OK"
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
-                # Ciclo interior que só destranca quando tiver a certeza do que o PC2 tem
                 while not sucesso_bloco:
                     recebeu_resposta = ack_event.wait(timeout=6.0)
 
-                    # 1. Se não recebeu resposta (PC2 demorado ou morto) -> PING
+                    # 1. Se falhou (Timeout ou Crash na BD), pedimos a verdade ao PC2 (PING)
                     if not recebeu_resposta or status_recebido == "ERROR_DB":
                         print("[MAIN] Timeout ou ERROR_DB! O PC2 falhou a inserção. A interrogar com Ping...")
                         ack_event.clear()
                         mqtt_client.publish(TOPIC_PING, json.dumps({"Player": N_JOGADOR}), qos=2)
                         time.sleep(2)
-                        continue # Volta ao inicio do while interior para ficar à espera da resposta ao Ping
+                        continue
 
-                    # Se o código chega aqui, é porque chegou uma resposta válida
                     ack_event.clear()
 
-                    # 2. CORTA-MATO: O PC2 morreu e ressuscitou a gritar RESEND!
-                    if pedido_resend:
+                    # =================================================================
+                    # AVALIAÇÃO UNIVERSAL DO ESTADO DA BD
+                    # =================================================================
+                    if last_ack_id == id_esperado:
+                        # SUCESSO TOTAL
+                        for doc in batch_data:
+                            db.Movimento.update_one({"_id": ObjectId(doc["_id"])}, {"$set": {"Migrado": True}})
+                        print(f"[MAIN] SUCESSO! Bloco concluído até {last_ack_id}.")
+                        sucesso_bloco = True
                         pedido_resend = False
-                        if last_ack_id in ids_no_bloco:
-                            index = ids_no_bloco.index(last_ack_id)
-                            # Marca como feito o que ele conseguiu guardar antes de morrer
-                            for i in range(index + 1):
-                                db.Movimento.update_one({"_id": ObjectId(batch_data[i]["_id"])}, {"$set": {"Migrado": True}})
 
-                            if index == len(batch_data) - 1:
-                                print("[MAIN] PÓS-CRASH: O PC2 já tinha guardado tudo antes de cair. Avançando...")
-                                sucesso_bloco = True
-                            else:
-                                print(f"[MAIN] PÓS-CRASH: Cortando bloco. A reenviar os {len(batch_data) - (index + 1)} itens perdidos...")
-                                batch_data = batch_data[index + 1:]
-                                break # Quebra o while interior para REPUBLICAR o bloco cortado
-                        else:
-                            print("[MAIN] PÓS-CRASH ou ROLLBACK TOTAL: O PC2 não tinha nenhum dado. A reenviar...")
-                            break # Quebra o while interior para REPUBLICAR o bloco inteiro
+                    elif last_ack_id in ids_no_bloco:
+                        # COMMIT PARCIAL DA BD (Muito raro, mas protegido!)
+                        index = ids_no_bloco.index(last_ack_id)
+                        for i in range(index + 1):
+                            db.Movimento.update_one({"_id": ObjectId(batch_data[i]["_id"])}, {"$set": {"Migrado": True}})
 
-                    # 3. MODO NORMAL: Avaliar as respostas
+                        print(f"[MAIN] RECUPERAÇÃO: A BD guardou apenas até {last_ack_id}. Cortando o bloco...")
+                        batch_data = batch_data[index + 1:]
+                        pedido_resend = False
+                        break # Republica só a segunda metade do bloco
+
                     else:
-                        if last_ack_id == id_esperado:
-                            # Sucesso Total! O PC2 confirmou o último ID do nosso bloco.
-                            for doc in batch_data:
-                                db.Movimento.update_one({"_id": ObjectId(doc["_id"])}, {"$set": {"Migrado": True}})
-                            print(f"[MAIN] SUCESSO! Bloco concluído até {last_ack_id}.")
-                            sucesso_bloco = True
-                        else:
-                            # Se o ID não bate certo, houve um rollback e o PC2 tem um ID antigo.
-                            # Temos de quebrar o ciclo para ele fazer Publish outra vez do bloco todo
-                            print(f"[MAIN] Inconsistência: PC2 está vivo mas no ID {last_ack_id}, queríamos o {id_esperado}.")
-                            print("[MAIN] O bloco não entrou na BD. A reenviar bloco...")
-                            time.sleep(2)
-                            break # <-- ESTE BREAK FORÇA O REENVIO DO BLOCO
+                        # ROLLBACK TOTAL
+                        print(f"[MAIN] ROLLBACK OU FALHA: O PC2 tem o ID {last_ack_id}, queríamos o {id_esperado}.")
+                        print("[MAIN] O bloco não entrou na BD. A reenviar na totalidade...")
+                        pedido_resend = False
+                        time.sleep(2)
+                        break # Republica o bloco inteiro novamente
 
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")
             time.sleep(5)
-
 
 def obter_valores_iniciais_nuvem():
     try:
