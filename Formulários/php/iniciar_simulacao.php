@@ -19,7 +19,6 @@ try {
     }
     header("Location: ../interface/dashboard.php?msg=simulacao_iniciada");
 } catch (Exception $e) {
-    // Se a SP falhar ou houver um erro, redireciona para a página de erro
     header("Location: ../interface/dashboard.php?erro=falha_iniciar");
 }
 exit();
