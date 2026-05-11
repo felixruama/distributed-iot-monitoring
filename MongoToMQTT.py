@@ -37,6 +37,7 @@ periodicidade = 1.0
 MARGEM_OUTLIER_TEMP = 5.0
 MARGEM_OUTLIER_SOM = 20.0
 last_ack_id = None
+status_recebido = "OK"
 ack_event = threading.Event()
 pedido_resend = False # --- FLAG GLOBAL DA TUA ESTRATÉGIA ---
 
@@ -51,7 +52,7 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message_back(client, userdata, msg):
-    global periodicidade, last_ack_id, pedido_resend
+    global periodicidade, last_ack_id, pedido_resend, status_recebido
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
 
@@ -133,7 +134,34 @@ def processar_som_temperatura_sec():
 def processar_movimentos_main():
     global last_ack_id, pedido_resend
     print("--- Início da Migração com Estratégia de Reconciliação (Sem Duplicados) ---")
+    print("[INIT] A iniciar Handshake de Sincronização com o PC2...")
+    sync_concluido = False
+    while not sync_concluido:
+        ack_event.clear()
+        # ping de arranque
+        mqtt_client.publish(TOPIC_PING, json.dumps({"Player": N_JOGADOR}), qos=2)
 
+        recebeu_resposta = ack_event.wait(timeout=5.0)
+
+        if recebeu_resposta:
+            if last_ack_id is not None:
+                try:
+                    #marcar como True todos os IDs até ao last_ack_id que o PC2 enviou
+                    resultado = db.Movimento.update_many(
+                        {"_id": {"$lte": ObjectId(last_ack_id)}, "Migrado": False},
+                        {"$set": {"Migrado": True}}
+                    )
+                    print(f"[INIT] Handshake Concluído! O PC2 já tinha até ao ID {last_ack_id}.")
+                    print(f"[INIT] Foram corrigidos {resultado.modified_count} documentos desfasados no MongoDB.")
+                except Exception as e:
+                    print(f"[INIT] Erro a alinhar BD no arranque: {e}")
+            else:
+                print("[INIT] Handshake Concluído! O PC2 não tem registos (BD vazia para esta simulação).")
+
+            sync_concluido = True # Desbloqueia e avança para a main thread!
+        else:
+            print("[INIT] O PC2 não está a responder (ou MySQL em baixo). A tentar de novo em 5s...")
+            time.sleep(5)
     while True:
         try:
             filtro_mov = {"Migrado": False, "Anomalia": False}
@@ -166,20 +194,22 @@ def processar_movimentos_main():
 
                 print(f"\n[MAIN] A publicar bloco de {len(batch_data)} movimentos...")
                 ack_event.clear()
+                status_recebido = "OK" # Resetamos o status antes de enviar
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
-                # Ciclo interior que só destranca quando o bloco for resolvido
+                # Ciclo interior que só destranca quando tiver a certeza do que o PC2 tem
                 while not sucesso_bloco:
                     recebeu_resposta = ack_event.wait(timeout=6.0)
 
                     # 1. Se não recebeu resposta (PC2 demorado ou morto) -> PING
-                    if not recebeu_resposta:
-                        print("[MAIN] Timeout! O PC2 está demorado. A interrogar com Ping...")
+                    if not recebeu_resposta or status_recebido == "ERROR_DB":
+                        print("[MAIN] Timeout ou ERROR_DB! O PC2 falhou a inserção. A interrogar com Ping...")
                         ack_event.clear()
                         mqtt_client.publish(TOPIC_PING, json.dumps({"Player": N_JOGADOR}), qos=2)
-                        continue # Volta ao inicio do while interior para ficar à espera do Ping
+                        time.sleep(2)
+                        continue # Volta ao inicio do while interior para ficar à espera da resposta ao Ping
 
-                    # Se o código chega aqui, é porque chegou um ACK ou um pedido de RESEND
+                    # Se o código chega aqui, é porque chegou uma resposta válida
                     ack_event.clear()
 
                     # 2. CORTA-MATO: O PC2 morreu e ressuscitou a gritar RESEND!
@@ -195,26 +225,28 @@ def processar_movimentos_main():
                                 print("[MAIN] PÓS-CRASH: O PC2 já tinha guardado tudo antes de cair. Avançando...")
                                 sucesso_bloco = True
                             else:
-                                print(f"[MAIN] PÓS-CRASH: Cortando bloco. A reenviar os {len(batch_data) - (index + 1)} itens que ele perdeu no crash...")
+                                print(f"[MAIN] PÓS-CRASH: Cortando bloco. A reenviar os {len(batch_data) - (index + 1)} itens perdidos...")
                                 batch_data = batch_data[index + 1:]
                                 break # Quebra o while interior para REPUBLICAR o bloco cortado
                         else:
-                            print("[MAIN] PÓS-CRASH: O PC2 não tinha nenhum dado deste bloco. A reenviar bloco inteiro...")
+                            print("[MAIN] PÓS-CRASH ou ROLLBACK TOTAL: O PC2 não tinha nenhum dado. A reenviar...")
                             break # Quebra o while interior para REPUBLICAR o bloco inteiro
 
-                    # 3. MODO NORMAL: Avaliar as respostas do ACK e Ping
+                    # 3. MODO NORMAL: Avaliar as respostas
                     else:
                         if last_ack_id == id_esperado:
-                            # O ID do ACK bate certo com o fim do nosso pacote = Sucesso Total
+                            # Sucesso Total! O PC2 confirmou o último ID do nosso bloco.
                             for doc in batch_data:
                                 db.Movimento.update_one({"_id": ObjectId(doc["_id"])}, {"$set": {"Migrado": True}})
                             print(f"[MAIN] SUCESSO! Bloco concluído até {last_ack_id}.")
                             sucesso_bloco = True
                         else:
-                            # O PC2 está vivo, mas está atrasado (o ACK recebido é antigo).
-                            print(f"[MAIN] PC2 vivo no ID {last_ack_id}, mas queremos {id_esperado}. A aguardar...")
+                            # Se o ID não bate certo, houve um rollback e o PC2 tem um ID antigo.
+                            # Temos de quebrar o ciclo para ele fazer Publish outra vez do bloco todo
+                            print(f"[MAIN] Inconsistência: PC2 está vivo mas no ID {last_ack_id}, queríamos o {id_esperado}.")
+                            print("[MAIN] O bloco não entrou na BD. A reenviar bloco...")
                             time.sleep(2)
-                            # Volta ao inicio do loop interior e espera de novo (se não houver ACK natural, ele manda Ping)
+                            break # <-- ESTE BREAK FORÇA O REENVIO DO BLOCO
 
         except Exception as e:
             print(f"[MAIN] Erro Crítico: {e}")

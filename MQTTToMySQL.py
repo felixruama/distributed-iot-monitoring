@@ -94,13 +94,15 @@ def on_connect(client, userdata, flags, rc):
 
     # --- ESTRATÉGIA GENIAL: Ao ligar/reiniciar, grita para a rede o último ID que tem guardado ---
     if id_simulacao_atual is not None and manter_conexao_viva():
-        db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
-        resultado = db_cursor.fetchone()
-        ultimo_id = resultado[0] if resultado else None
-
-        resend_payload = {"Player": N_JOGADOR, "last_id": ultimo_id}
-        client.publish(TOPIC_RESEND, json.dumps(resend_payload), qos=2)
-        print(f"[RESEND] Comando de sincronização pós-boot enviado ao PC1 (Último ID: {ultimo_id})")
+        try:
+            db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
+            resultado = db_cursor.fetchone()
+            ultimo_id = resultado[0] if resultado else None
+            resend_payload = {"Player": N_JOGADOR, "last_id": ultimo_id}
+            client.publish(TOPIC_RESEND, json.dumps(resend_payload), qos=2)
+            print(f"[RESEND] Comando de sincronização pós-boot enviado ao PC1 (Último ID: {ultimo_id})")
+        except Exception as e:
+            print(f"[AVISO BOOT] Não foi possível verificar o último ID no MySQL no arranque: {e}")
 
 def on_message(client, userdata, msg):
     global last_inserted_id, id_simulacao_atual
@@ -114,6 +116,7 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode('utf-8'))
 
         if msg.topic == TOPIC_MOV:
+            sucesso_bloco = True
             for mov in payload:
                 try:
                     db_cursor.callproc('SP_RegistarPassagem', [
@@ -123,17 +126,39 @@ def on_message(client, userdata, msg):
                     last_inserted_id = mov['_id']
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
-                    break
+                    sucesso_bloco = False
+                    break # Abandona o resto do bloco se der erro
 
-            db_conn.commit()
-            ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": 1}
-            client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+            if sucesso_bloco:
+                db_conn.commit() # guarda tudo!
+                ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": "OK"}
+                client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+            else:
+                try:
+                    db_conn.rollback() # DESFAZ TUDO O QUE TENTOU INSERIR NESTE BLOCO
+                except:
+                    pass
+                print("[PC2] Bloco falhou. Rollback efetuado.")
+                err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
+                client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
 
         elif msg.topic == TOPIC_PING:
-            db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
-            resultado = db_cursor.fetchone()
-            ack_payload = {"Player": N_JOGADOR, "last_id": resultado[0] if resultado else None, "status": 1}
-            client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+            try:
+                # Vamos à BD buscar o ultimo id
+                db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
+                resultado = db_cursor.fetchone()
+                ultimo_id_bd = resultado[0] if resultado else None
+
+                # responde com ack e o id
+                ack_payload = {"Player": N_JOGADOR, "last_id": ultimo_id_bd, "status": "OK"}
+                client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+                print(f"[SYNC] O PC1 pediu estado atual. Respondido com last_id: {ultimo_id_bd}")
+
+            except mysql.connector.Error as err:
+                print(f"[ERRO SYNC] PC1 pediu estado, mas o MySQL está em baixo: {err}")
+                # Avisa o PC1 que esta vivo mas a BD está em baixo
+                err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
+                client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
 
         elif msg.topic in [TOPIC_TEMP, TOPIC_SOM]:
             val = float(payload.get('Temperature') or payload.get('Sound'))
