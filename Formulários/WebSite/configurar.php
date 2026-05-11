@@ -1,12 +1,11 @@
 <?php
 session_start();
-// Chamamos o Handler que já traz a ligação à BD
 require_once('../php/SPHandler.php');
 
 $id_simulacao = $_GET['id'] ?? 1;
 $id_logado = $_SESSION['IDUtilizador'];
 
-// 1. Chamar a SP_VisualizarDetalhes via Manager
+// Chamar SP_VisualizarDetalhes 
 $resultados = $spManager->getData('SP_VisualizarDetalhes', [$id_simulacao]);
 $dados = $resultados[0] ?? null;
 
@@ -15,7 +14,7 @@ if (!$dados) {
     exit();
 }
 
-// 2. REGRA DE NEGÓCIO: Se for o criador, pode editar.
+// Se for o criador, pode editar.
 $pode_editar = ($dados['Criador'] == $id_logado);
 
 include('includes/header.php');
@@ -55,7 +54,6 @@ include('includes/header.php');
             <div class="info-item"><label>Ruído Máximo:</label> <span>80 dB</span></div>
         </aside>
 
-        <!-- DIREITA: Formulário -->
         <main class="card-main-edit">
             <form action="../php/guardar_configuracao.php" method="POST">
                 <input type="hidden" name="id_simulacao" value="<?php echo $dados['IDSimulacao']; ?>">
