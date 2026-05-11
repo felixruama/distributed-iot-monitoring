@@ -3,13 +3,11 @@
 
 No PC2:
 
-- CALL SP_CriarSimulacao(1, 'Teste com Alertas');
+-- Parâmetros: (ID_Utilizador_Criador, Descrição, TempMax, TempMin, RuidoMax, Periodicidade, IntervaloAlertas)
+CALL SP_CriarSimulacao(12, 'Teste com Alertas', 30.0, 15.0, 80.0, 5, 60);
 
-	mudar id para 0 e queipa para 7
-
--- Parâmetros: IDSimulacao, TempMin, TempMax, RuidoMax, Periodicidade, IntervaloAlertas(Segundos)
-
-- CALL SP_ValidarParametros(1, 10.0, 24.0, 20.0, 1, 60);
+-- Parâmetros: (ID_Simulacao, ID_Utilizador_Criador, TempMax, TempMin, RuidoMax, Periodicidade, IntervaloAlertas)
+CALL SP_ValidarParametros(1, 12, 32.0, 18.0, 85.0, 5, 60);
 
 python cloudToMySQL.py 1
 
@@ -29,14 +27,15 @@ python MongoToMQTT.py
 
 No fim:
 
+SET FOREIGN_KEY_CHECKS = 0;
+
 TRUNCATE TABLE som;
 TRUNCATE TABLE temperatura;
-DELETE FROM marsami;
-TRUNCATE TABLE corredor;
-TRUNCATE TABLE medicoespassagens;
 TRUNCATE TABLE mensagens;
+TRUNCATE TABLE medicoespassagens;
 TRUNCATE TABLE ocupacaolabirinto;
-DELETE FROM simulacao;
+TRUNCATE TABLE corredor;
+TRUNCATE TABLE marsami;
+TRUNCATE TABLE simulacao;
 
-
-
+SET FOREIGN_KEY_CHECKS = 1;
