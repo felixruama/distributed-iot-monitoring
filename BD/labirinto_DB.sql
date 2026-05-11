@@ -18,10 +18,10 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Base de dados: `labirinto_DBNEW`
+-- Base de dados: `labirinto_DB`
 --
-CREATE DATABASE IF NOT EXISTS `labirinto_DBNEW` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE `labirinto_DBNEW`;
+CREATE DATABASE IF NOT EXISTS `labirinto_DB` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE `labirinto_DB`;
 
 DELIMITER $$
 --
