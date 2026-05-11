@@ -25,3 +25,18 @@ python MongoToMQTT.py
 
 .\mazerun.exe 7 --broker broker.hivemq.com --portbroker 1883
 
+
+
+No fim:
+
+TRUNCATE TABLE som;
+TRUNCATE TABLE temperatura;
+DELETE FROM marsami;
+TRUNCATE TABLE corredor;
+TRUNCATE TABLE medicoespassagens;
+TRUNCATE TABLE mensagens;
+TRUNCATE TABLE ocupacaolabirinto;
+DELETE FROM simulacao;
+
+
+
