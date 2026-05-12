@@ -117,19 +117,23 @@ def calcular_media(lista):
 
 def reenviar_ultimas_medicoes():
     try:
-        print("\n[RECUPERAÇÃO] O PC2 voltou! A reenviar as últimas 5 medições de Som e Temp...")
+        print("\n[RECUPERAÇÃO] O PC2 voltou! A enviar a ÚLTIMA medição válida de Som e Temp para garantir o estado...")
         for col_name, topic in [("Som", TOPIC_SOM), ("Temperatura", TOPIC_TEMP)]:
-            # Vai à base de dados buscar os 5 mais recentes (sort("_id", -1))
-            ultimos = list(db[col_name].find({"Anomalia": False}).sort("_id", -1).limit(5))
 
-            # Reverte a lista para enviar na ordem correta (do mais antigo para o mais novo)
-            for doc in reversed(ultimos):
-                payload = {**doc, "_id": str(doc["_id"])}
-                # Usa QoS 1 para garantir que o broker entrega mesmo a mensagem
+            # Procura apenas a ÚLTIMA (1) que já foi avaliada pela outra thread (Migrado: True)
+            ultimo = db[col_name].find_one(
+                {"Migrado": True, "Anomalia": False, "isOutlier": False},
+                sort=[("_id", -1)]
+            )
+
+            if ultimo:
+                payload = {**ultimo, "_id": str(ultimo["_id"])}
+                # Usa QoS 1 para garantir que a mensagem de salvamento chega
                 mqtt_client.publish(topic, json.dumps(payload), qos=1)
-        print("[RECUPERAÇÃO] Medições enviadas para avaliação de limites!")
+
+        print("[RECUPERAÇÃO] Última medição de estado enviada com sucesso!")
     except Exception as e:
-        print(f"[ERRO RECUPERAÇÃO] Falha ao reenviar medições: {e}")
+        print(f"[ERRO RECUPERAÇÃO] Falha ao reenviar: {e}")
 
 def processar_som_temperatura_sec():
     while True:
