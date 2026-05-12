@@ -77,7 +77,6 @@ def main():
         except Exception as e:
             print(f"Ocorreu um erro: {e}")
 
-        # Aguarda 3 segundos antes de verificar novamente
         time.sleep(3)
 
 if __name__ == "__main__":
