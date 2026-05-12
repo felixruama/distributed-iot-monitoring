@@ -73,6 +73,7 @@ def procurar_simulacao_ativa():
     global id_simulacao_atual, limites_alerta
     if not manter_conexao_viva(): return
     try:
+        db_conn.commit()
         db_cursor.execute("SELECT IDSimulacao, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta FROM simulacao WHERE Estado = '1' LIMIT 1")
         resultado = db_cursor.fetchone()
 
@@ -135,10 +136,10 @@ def on_message(client, userdata, msg):
                 client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
             else:
                 try:
-                    db_conn.rollback() # DESFAZ TUDO O QUE TENTOU INSERIR NESTE BLOCO
+                    db_conn.commit() #tenta inserir o q ja tem
                 except:
                     pass
-                print("[PC2] Bloco falhou. Rollback efetuado.")
+                print("[PC2] Bloco falhou a meio. Commit parcial efetuado.")
                 err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
                 client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
 

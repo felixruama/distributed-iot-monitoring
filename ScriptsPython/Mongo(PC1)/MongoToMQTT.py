@@ -43,6 +43,30 @@ pedido_resend = False
 max_marsamis_global = 0
 lista_corredores_global = []
 
+
+ARQUIVO_CONFIG = "estado_pc1.json"
+
+def guardar_estado_local(periodicidade_atual):
+    """Guarda a configuração atual num ficheiro."""
+    estado = {"Periodicidade": periodicidade_atual}
+    try:
+        with open(ARQUIVO_CONFIG, "w") as f:
+            json.dump(estado, f)
+    except Exception as e:
+        print(f"[AVISO] Não foi possível guardar o estado: {e}")
+
+def carregar_estado_local():
+    """Lê a configuração guardada (se existir)."""
+    global periodicidade
+    if os.path.exists(ARQUIVO_CONFIG):
+        try:
+            with open(ARQUIVO_CONFIG, "r") as f:
+                estado = json.load(f)
+                periodicidade = estado.get("Periodicidade", 1.0)
+                print(f"[RECUPERAÇÃO] Estado carregado do disco! Periodicidade: {periodicidade}s")
+        except Exception as e:
+            print(f"[AVISO] Ficheiro de estado corrompido, a usar valores por defeito. Erro: {e}")
+
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC1 Ligado ao Broker (Código: {rc})")
     client.subscribe(TOPIC_ACK, qos=2)
@@ -66,11 +90,15 @@ def on_message_back(client, userdata, msg):
             ack_event.set()
             print(f"[RESEND] O PC2 reiniciou! Último ID sobrevivente no MySQL: {last_ack_id}")
 
+            # Arrancamos a função numa thread separada para não bloquear a receção de mensagens MQTT
+            threading.Thread(target=reenviar_ultimas_medicoes, daemon=True).start()
+
         elif msg.topic == TOPIC_CONFIG:
             nova_periodicidade = payload.get("Periodicidade")
             if nova_periodicidade:
                 periodicidade = float(nova_periodicidade)
                 print(f"[CONFIG] Periodicidade atualizada remotamente para: {periodicidade}s")
+                guardar_estado_local(periodicidade)
     except Exception as e:
         print(f"[MQTT] Erro no processamento da mensagem: {e}")
 
@@ -86,6 +114,22 @@ mqtt_client.loop_start()
 def calcular_media(lista):
     if not lista: return 0
     return sum(lista) / len(lista)
+
+def reenviar_ultimas_medicoes():
+    try:
+        print("\n[RECUPERAÇÃO] O PC2 voltou! A reenviar as últimas 5 medições de Som e Temp...")
+        for col_name, topic in [("Som", TOPIC_SOM), ("Temperatura", TOPIC_TEMP)]:
+            # Vai à base de dados buscar os 5 mais recentes (sort("_id", -1))
+            ultimos = list(db[col_name].find({"Anomalia": False}).sort("_id", -1).limit(5))
+
+            # Reverte a lista para enviar na ordem correta (do mais antigo para o mais novo)
+            for doc in reversed(ultimos):
+                payload = {**doc, "_id": str(doc["_id"])}
+                # Usa QoS 1 para garantir que o broker entrega mesmo a mensagem
+                mqtt_client.publish(topic, json.dumps(payload), qos=1)
+        print("[RECUPERAÇÃO] Medições enviadas para avaliação de limites!")
+    except Exception as e:
+        print(f"[ERRO RECUPERAÇÃO] Falha ao reenviar medições: {e}")
 
 def processar_som_temperatura_sec():
     while True:
@@ -235,7 +279,7 @@ def processar_movimentos_main():
 
                     else:
                         # ROLLBACK TOTAL
-                        print(f"[MAIN] ROLLBACK OU FALHA: O PC2 tem o ID {last_ack_id}, queríamos o {id_esperado}.")
+                        print(f"[MAIN] FALHA: O PC2 tem o ID {last_ack_id}, queríamos o {id_esperado}.")
                         print("[MAIN] O bloco não entrou na BD. A reenviar na totalidade...")
                         pedido_resend = False
                         time.sleep(2)
@@ -260,6 +304,7 @@ def obter_valores_iniciais_nuvem():
     except Exception as e: return 20.0, 20.0, 10, []
 
 if __name__ == "__main__":
+    carregar_estado_local()
     som_base, temp_base, max_marsamis_global, lista_corredores_global = obter_valores_iniciais_nuvem()
     historico_som.append(som_base); historico_temp.append(temp_base)
     threading.Thread(target=processar_som_temperatura_sec, daemon=True).start()
