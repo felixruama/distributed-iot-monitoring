@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 12, 2026 at 12:22 PM
+-- Generation Time: May 12, 2026 at 01:10 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -394,7 +394,7 @@ WHERE Email = p_Email;
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_ValidarParametros`$$
-CREATE DEFINER=`root`@`%` PROCEDURE `SP_ValidarParametros` (IN `p_IDSimulacao` INT, IN `p_IDUtilizador` INT, IN `p_TempMax` INT, IN `p_TempMin` INT, IN `p_RuidoMax` INT, IN `p_Periodicidade` INT, IN `p_intervaloAlertas` INT)   BEGIN
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_ValidarParametros` (IN `p_IDSimulacao` INT, IN `p_IDUtilizador` INT, IN `p_TempMax` DECIMAL(6,2), IN `p_TempMin` DECIMAL(6,2), IN `p_RuidoMax` DECIMAL(6,2), IN `p_Periodicidade` INT, IN `p_intervaloAlertas` INT)   BEGIN
     DECLARE v_estado ENUM('0','1','2');
     DECLARE v_criador INT;
 
