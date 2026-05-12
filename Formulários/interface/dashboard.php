@@ -74,7 +74,16 @@ include('includes/header.php');
             </div>
         <?php endforeach; ?>
     <?php endif; ?>
-
+    <?php if (isset($_GET['erro'])): ?>
+        <script>
+            // O PHP escreve a mensagem de erro diretamente dentro do alert do JavaScript
+            alert("<?php echo htmlspecialchars($_GET['erro']); ?>");
+            
+            // Esta linha limpa o '?erro=...' do link lá em cima, para que se o utilizador 
+            // fizer F5 (refresh) à página, o pop-up não volte a aparecer do nada!
+            window.history.replaceState(null, null, window.location.pathname);
+        </script>
+    <?php endif; ?>
 </div>
 
 <?php include('includes/footer.php'); ?>
