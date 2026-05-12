@@ -1,13 +1,22 @@
 <?php
+// O db_config já faz a verificação de segurança máxima.
 include 'db_config.php';
-$user_login = $_GET['username']; // O Android envia via GET
-$pass_login = $_GET['password'];
-$sql = "CALL SP_ValidarLogin('$user_login', '$pass_login')"; //
+
+// SE O CÓDIGO CHEGOU AQUI, A PASSWORD ESTÁ CORRETA!
+$user_login = $_REQUEST['username']; 
+
+// Já não precisamos da SP_ValidarLogin! Vamos apenas buscar a Equipa diretamente.
+$sql = "SELECT Equipa FROM utilizador WHERE Email = '$user_login'";
 $result = $conn->query($sql);
+
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
-    echo json_encode(["success" => true, "IDGrupo" => $row['Equipa']]); //
+    // Envia o JSON perfeito de volta para o Android com a Equipa
+    echo json_encode(["success" => true, "IDGrupo" => (int)$row['Equipa']]);
 } else {
-    echo json_encode(["success" => false, "message" => "Erro no Login"]);
+    // Caso raro de o user existir no MySQL mas ter sido apagado da tabela
+    echo json_encode(["success" => false, "message" => "Erro: Conta sem perfil registado."]);
 }
+
+$conn->close();
 ?>
