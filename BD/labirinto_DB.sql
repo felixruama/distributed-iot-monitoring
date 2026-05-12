@@ -580,11 +580,11 @@ CREATE TABLE `historico_ocupacaolabirinto` (
 DROP TABLE IF EXISTS `historico_simulacao`;
 CREATE TABLE `historico_simulacao` (
                                        `IDSimulacao` int NOT NULL,
-                                       `Descricao` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                                       `Descricao` varchar(255) DEFAULT NULL,
                                        `Equipa` int NOT NULL,
                                        `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                        `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                       `Pontos` int DEFAULT NULL,
+                                       `Pontos` decimal(6,1) DEFAULT NULL,
                                        `Criador` int NOT NULL DEFAULT '0',
                                        `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
                                        `TempMinAlerta` decimal(6,2) DEFAULT NULL,
