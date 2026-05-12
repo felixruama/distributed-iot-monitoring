@@ -175,7 +175,8 @@ def on_message(client, userdata, msg):
                         mov['RoomDestiny'], mov['Status'], mov['_id']
                     ])
                     last_inserted_id = mov['_id']
-                    salas_afetadas_neste_bloco.add(mov['RoomDestiny']) # <--- PASSO 3B: Guardar a sala de destino
+                    if mov['RoomDestiny'] != 0: # Ignora a sala 0
+                        salas_afetadas_neste_bloco.add(mov['RoomDestiny']) # <--- PASSO 3B: Guardar a sala de destino
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
                     sucesso_bloco = False
