@@ -24,7 +24,8 @@ TOPIC_SOM = f"pisid_mazesoundm_{N_JOGADOR}"
 TOPIC_TEMP = f"pisid_mazetempm_{N_JOGADOR}"
 TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
-TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}" # --- NOVO TÓPICO ---
+TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}"
+TOPIC_ACTUATORS = "pisid_mazeact"
 
 # Estado Global
 last_inserted_id = None
@@ -34,6 +35,53 @@ id_simulacao_atual = None
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
+
+# ==========================================
+# FUNÇÕES DE ATUADORES / GATILHOS
+# ==========================================
+
+def verificar_sensores_atuadores(client, sensor_type, valor):
+    """
+    Compara o valor lido com os limites de alerta guardados em memória.
+    Dispara os atuadores correspondentes para a nuvem do professor.
+    """
+    if sensor_type == 'T':
+        t_max = limites_alerta['temp_max']
+        t_min = limites_alerta['temp_min']
+        
+        if t_max is not None and valor > t_max:
+            msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
+            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+            print(f"[ATUADOR] Temp {valor}ºC > Max ({t_max}ºC). Comando: {msg}")
+            
+        elif t_min is not None and valor < t_min:
+            msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
+            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+            print(f"[ATUADOR] Temp {valor}ºC < Min ({t_min}ºC). Comando: {msg}")
+            
+    elif sensor_type == 'S':
+        s_max = limites_alerta['som_max']
+        if s_max is not None and valor > s_max:
+            msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
+            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+            print(f"[ATUADOR] Som {valor}dB > Max ({s_max}dB). Comando: {msg}")
+
+def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
+    """
+    Verifica no MySQL se os Odd são iguais aos Even na sala atual.
+    """
+    try:
+        cursor.execute("SELECT NumeroMarsamisOdd, NumeroMarsamisEven FROM ocupacaolabirinto WHERE Sala = %s AND IDSimulacao = %s", (sala, id_simulacao))
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            odd, even = resultado
+            if odd == even and odd > 0:
+                msg = f"{{Type: Score, Player: {N_JOGADOR}, Room: {sala}}}"
+                client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                print(f"[GATILHO SCORE] Sala {sala} - Igualdade (Odd:{odd}, Even:{even}). Comando: {msg}")
+    except Exception as e:
+        print(f"[ERRO GATILHO] Falha ao verificar sala {sala}: {e}")
 
 def carregar_limites_nuvem():
     global limites_termino
@@ -118,6 +166,8 @@ def on_message(client, userdata, msg):
 
         if msg.topic == TOPIC_MOV:
             sucesso_bloco = True
+            salas_afetadas_neste_bloco = set() # <--- PASSO 3B: Iniciar o Set para guardar as salas
+            
             for mov in payload:
                 try:
                     db_cursor.callproc('SP_RegistarPassagem', [
@@ -125,6 +175,7 @@ def on_message(client, userdata, msg):
                         mov['RoomDestiny'], mov['Status'], mov['_id']
                     ])
                     last_inserted_id = mov['_id']
+                    salas_afetadas_neste_bloco.add(mov['RoomDestiny']) # <--- PASSO 3B: Guardar a sala de destino
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
                     sucesso_bloco = False
@@ -134,6 +185,11 @@ def on_message(client, userdata, msg):
                 db_conn.commit() # guarda tudo!
                 ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": "OK"}
                 client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+                
+                # <--- PASSO 3B: Chamar a função de gatilho de pontuação para as salas afetadas
+                for sala in salas_afetadas_neste_bloco:
+                    verificar_gatilho_marsamis(client, sala, id_simulacao_atual, db_cursor)
+
             else:
                 try:
                     db_conn.commit() #tenta inserir o q ja tem
@@ -144,20 +200,16 @@ def on_message(client, userdata, msg):
                 client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
 
         elif msg.topic == TOPIC_PING:
+            # ... (código do PING mantém-se inalterado) ...
             try:
-                # Vamos à BD buscar o ultimo id
                 db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
                 resultado = db_cursor.fetchone()
                 ultimo_id_bd = resultado[0] if resultado else None
-
-                # responde com ack e o id
                 ack_payload = {"Player": N_JOGADOR, "last_id": ultimo_id_bd, "status": "OK"}
                 client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
                 print(f"[SYNC] O PC1 pediu estado atual. Respondido com last_id: {ultimo_id_bd}")
-
             except mysql.connector.Error as err:
                 print(f"[ERRO SYNC] PC1 pediu estado, mas o MySQL está em baixo: {err}")
-                # Avisa o PC1 que esta vivo mas a BD está em baixo
                 err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
                 client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
 
@@ -182,6 +234,7 @@ def on_message(client, userdata, msg):
                     texto_mensagem = f"Atenção! A temperatura desceu para {val}ºC."
                 if limites_termino['temp_max'] is not None and (val > limites_termino['temp_max'] or val < limites_termino['temp_min']):
                     is_terminar = True
+                
             else:
                 db_cursor.execute("INSERT INTO som (Hora, Som) VALUES (%s, %s)", (hora_sensor, val))
                 if limites_alerta['som_max'] is not None and val > limites_alerta['som_max']:
@@ -190,7 +243,7 @@ def on_message(client, userdata, msg):
                     texto_mensagem = f"Atenção! O nível de ruído atingiu {val}dB."
                 if limites_termino['som_max'] is not None and val > limites_termino['som_max']:
                     is_terminar = True
-
+                    
             if is_alerta:
                 db_cursor.callproc('SP_RegistarAlerta', [id_simulacao_atual, sensor_type, val, tipo_alerta, texto_mensagem, hora_sensor])
 
@@ -200,6 +253,10 @@ def on_message(client, userdata, msg):
                 id_simulacao_atual = None
 
             db_conn.commit()
+            
+            # <--- PASSO 3A: Disparar os atuadores físicos após o commit local
+            verificar_sensores_atuadores(client, sensor_type, val) 
+
     except Exception as e:
         print(f"[ERRO CRÍTICO] {e}")
 
