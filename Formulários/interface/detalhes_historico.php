@@ -1,72 +1,76 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+session_start();
+// 1. Carrega o SPManager (Ele já cria a variável $spManager automaticamente, não precisas do "new")
+require_once('../php/SPHandler.php'); 
 
-if (!isset($_SESSION['user_email'])) {
-    header("Location: index.php");
-    exit();
-}
+$id_simulacao = $_GET['id'] ?? 999;
 
-require_once('../php/SPHandler.php');
-
-$id_simulacao = $_GET['id'] ?? null;
-
-if (!$id_simulacao) {
-    header("Location: historico.php");
-    exit();
-}
-
+// --- BLOCO 1: DADOS GERAIS (Usando o teu SPManager via PDO) ---
 $resultados = $spManager->getData('SP_VisualizarDetalhes_Historico', [(int)$id_simulacao]);
 $dados = $resultados[0] ?? null;
 
-if (!$dados) {
-    die("Erro: Registo de simulação não encontrado no arquivo.");
+
+// --- MUDANÇA: NOVO BLOCO ESTATÍSTICAS (MVP, Explorador, Sala) ---
+$stats_mvp = null; $stats_explora = null; $stats_sala = null;
+
+// 2. Criamos uma ligação MYSQLI isolada apenas para podermos usar o multi_query 
+// (O site usa o utilizador root do Docker, independente do Android)
+$conn = new mysqli('mysql', 'root', 'root', 'labirinto_DB'); 
+
+// Só executa se ligar bem à BD
+if (!$conn->connect_error) {
+    if (mysqli_multi_query($conn, "CALL SP_EstatisticasFinaisSimulacao($id_simulacao)")) {
+        
+        // 1. Lê MVP
+        $res = mysqli_store_result($conn); 
+        if ($res) { $stats_mvp = mysqli_fetch_assoc($res); mysqli_free_result($res); }
+        
+        // 2. Lê Explorador
+        if (mysqli_more_results($conn)) {
+            mysqli_next_result($conn);
+            $res = mysqli_store_result($conn); 
+            if ($res) { $stats_explora = mysqli_fetch_assoc($res); mysqli_free_result($res); }
+        }
+        
+        // 3. Lê Hotspot (Sala)
+        if (mysqli_more_results($conn)) {
+            mysqli_next_result($conn);
+            $res = mysqli_store_result($conn); 
+            if ($res) { $stats_sala = mysqli_fetch_assoc($res); mysqli_free_result($res); }
+        }
+    }
+    // Fecha esta ligação específica pois já tirámos os dados
+    $conn->close();
 }
 
 include('includes/header.php');
 ?>
+<div class="container" style="padding: 20px;">
+    <h1>Relatório da Simulação #<?php echo htmlspecialchars($id_simulacao); ?></h1>
 
-<div class="container">
-    <div class="page-header" style="margin-bottom: 30px;">
-        <a href="historico.php" class="btn-back" style="text-decoration: none; color: var(--tech-blue); font-weight: bold;">
-            ← Voltar ao Arquivo
-        </a>
-        <h1 style="margin-top: 20px;">Relatório da Simulação #<?php echo $dados['IDSimulacao']; ?></h1>
-        <p style="color: #666;"><?php echo htmlspecialchars($dados['Descricao'] ?? 'Sem descrição'); ?></p>
-        <span class="badge" style="background-color: #d4edda; color: #155724; padding: 6px 15px; border-radius: 12px; font-weight: bold; font-size: 0.9rem;">
-            Estado: Terminada
-        </span>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-        <section class="card" style="border-left: 5px solid #6c757d;">
-            <h3 style="margin-top: 0; color: #444;"><i class="fas fa-history"></i> Datas do Evento</h3>
-            <div style="margin-top: 15px;">
-                <p><strong>Início:</strong> <?php echo $dados['DataHoraInicio'] ?? '---'; ?></p>
-                <p><strong>Fim:</strong> <?php echo $dados['DataHoraFim'] ?? '---'; ?></p>
-                <p><strong>Responsável:</strong> <?php echo htmlspecialchars($dados['NomeCriador']); ?></p>
-            </div>
-        </section>
-
-        <section class="card" style="border-left: 5px solid var(--tech-blue);">
-            <h3 style="margin-top: 0; color: var(--tech-blue);"><i class="fas fa-shield-alt"></i> Limites de Segurança</h3>
-            <div style="margin-top: 15px;">
-                <p><strong>Temp. Mínima:</strong> <?php echo $dados['TempMin'] ?? 'N/A'; ?>°C</p>
-                <p><strong>Temp. Máxima:</strong> <?php echo $dados['TempMax'] ?? 'N/A'; ?>°C</p>
-                <p><strong>Ruído Máximo:</strong> <?php echo $dados['RuidoMax'] ?? 'N/A'; ?> dB</p>
-            </div>
-        </section>
-    </div>
-
-    <section class="card">
-        <h3 style="margin-top: 0; color: #444;"><i class="fas fa-chart-line"></i> Resumo de Leituras</h3>
-        <div style="background-color: #f8f9fa; border: 2px dashed #ccc; border-radius: 10px; padding: 40px; text-align: center; color: #777; margin-top: 20px;">
-            <i class="fas fa-microchip" style="font-size: 2rem; margin-bottom: 10px;"></i>
-            <h4>Área Reservada para Gráficos</h4>
-            <p>Os dados captados pelos sensores (MQTT) aparecerão aqui assim que ligarmos a tabela de medições.</p>
+    <div style="display: flex; gap: 20px; margin: 20px 0; font-family: sans-serif;">
+        <div style="flex:1; background:#fff; padding:15px; border-top:5px solid #FFD700; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h4 style="margin:0; color:#856404;">🏆 MVP Atividade</h4>
+            <p style="font-size: 1.1rem; margin:10px 0;">Marsami <b>#<?php echo $stats_mvp['IDMarsami'] ?? '?'; ?></b></p>
+            <small><?php echo $stats_mvp['TotalPassagens'] ?? 0; ?> passagens</small>
         </div>
+        <div style="flex:1; background:#fff; padding:15px; border-top:5px solid #28a745; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h4 style="margin:0; color:#155724;">🧭 Explorador</h4>
+            <p style="font-size: 1.1rem; margin:10px 0;">Marsami <b>#<?php echo $stats_explora['IDMarsami'] ?? '?'; ?></b></p>
+            <small>Visitou <?php echo $stats_explora['SalasDiferentes'] ?? 0; ?> salas</small>
+        </div>
+        <div style="flex:1; background:#fff; padding:15px; border-top:5px solid #17a2b8; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h4 style="margin:0; color:#0c5460;">🔥 Hotspot</h4>
+            <p style="font-size: 1.1rem; margin:10px 0;">Sala <b><?php echo $stats_sala['Sala'] ?? '?'; ?></b></p>
+            <small><?php echo $stats_sala['TotalEntradas'] ?? 0; ?> visitas totais</small>
+        </div>
+    </div>
+
+    <section class="card" style="margin-top: 20px; padding: 20px; background: white;">
+        <h3>Dados Gerais</h3>
+        <p><strong>Descrição:</strong> <?php echo $dados['Descricao'] ?? 'N/A'; ?></p>
+        <p><strong>Responsável:</strong> <?php echo $dados['NomeCriador'] ?? 'N/A'; ?></p>
+        <p><strong>Duração:</strong> <?php echo $dados['DataHoraInicio'] ?? 'N/A'; ?> até <?php echo $dados['DataHoraFim'] ?? 'N/A'; ?></p>
     </section>
 </div>
-
 <?php include('includes/footer.php'); ?>
