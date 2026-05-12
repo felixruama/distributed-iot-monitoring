@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 12, 2026 at 01:10 PM
+-- Generation Time: May 12, 2026 at 06:57 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -211,8 +211,8 @@ IF v_simulacoes_terminadas > 0 THEN
 SELECT IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado
 FROM simulacao WHERE Estado = '2';
 
-INSERT INTO historico_medicoespassagens (IDMedicao, Hora, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao)
-SELECT IDMedicao, DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao
+INSERT INTO historico_medicoespassagens (IDMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao)
+SELECT IDMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao
 FROM medicoespassagens
 WHERE IDSimulacao IN (SELECT IDSimulacao FROM simulacao WHERE Estado = '2');
 
@@ -239,7 +239,13 @@ END IF;
 
 COMMIT;
 
-SELECT 'SUCESSO: Simulação iniciada. Tabela de histórico atualizada e lixo limpo!' AS Resultado;
+ALTER TABLE som AUTO_INCREMENT = 1;
+ALTER TABLE temperatura AUTO_INCREMENT = 1;
+ALTER TABLE medicoespassagens AUTO_INCREMENT = 1;
+ALTER TABLE corredor AUTO_INCREMENT = 1;
+ALTER TABLE mensagens AUTO_INCREMENT = 1;
+
+SELECT 'SUCESSO: Simulação iniciada, histórico salvo e todos os IDs repostos a 1!' AS Resultado;
 
 END$$
 
@@ -355,30 +361,43 @@ START TRANSACTION;
 -- Determinar se o Marsami é Ímpar (1) ou Par (0)
 SET v_parity = p_id_marsami % 2;
 
-    -- 1. Registar a passagem
+    -- 1. Regista sempre a passagem no histórico (mesmo sendo 0 -> 0)
 INSERT INTO medicoespassagens (SalaOrigem, SalaDestino, IDMarsami, Status, IDSimulacao, IDMongo)
 VALUES (p_origem, p_destino, p_id_marsami, p_status, p_id_simulacao, p_idmongo);
 
--- 2. Retirar o Marsami da sala de ORIGEM
-IF v_parity = 1 THEN
+-- 2. Verifica se é um "movimento fantasma" (0 -> 0)
+IF p_origem = 0 AND p_destino = 0 THEN
+        -- O Marsami não mudou de sala! Apenas atualizamos o estado de cansaço
+UPDATE marsami
+SET Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END
+WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
+
+ELSE
+        -- 3. Lógica normal de movimento (ou largada inicial 0 -> X)
+
+        -- Retirar o Marsami da sala de ORIGEM
+        IF v_parity = 1 THEN
 UPDATE ocupacaolabirinto SET NumeroMarsamisOdd = GREATEST(NumeroMarsamisOdd - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
 ELSE
 UPDATE ocupacaolabirinto SET NumeroMarsamisEven = GREATEST(NumeroMarsamisEven - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
 END IF;
 
-    -- 3. Adicionar o Marsami à sala de DESTINO
-    IF v_parity = 1 THEN
-        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (1, 0, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisOdd = NumeroMarsamisOdd + 1;
+        -- Adicionar o Marsami à sala de DESTINO
+        IF v_parity = 1 THEN
+            INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (1, 0, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisOdd = NumeroMarsamisOdd + 1;
 ELSE
-        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (0, 1, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisEven = NumeroMarsamisEven + 1;
+            INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (0, 1, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisEven = NumeroMarsamisEven + 1;
 END IF;
 
-    -- 4. Atualizar a localização e o estado Cansado do Marsami
-UPDATE marsami SET IDSala = p_destino, Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
+        -- Atualizar a localização atual do Marsami (nao atualiza o estado de cansado pq a origem e o destino teriam de ser 0)
+UPDATE marsami
+SET IDSala = p_destino
+WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
 
--- Se chegou aqui sem crashar, grava definitivamente as 4 alterações ao mesmo tempo!
+END IF;
+
+    -- Se chegou aqui sem crashar, grava definitivamente as alterações ao mesmo tempo!
 COMMIT;
-
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_TerminarSimulacao`$$
@@ -548,12 +567,11 @@ DELIMITER ;
 DROP TABLE IF EXISTS `historico_medicoespassagens`;
 CREATE TABLE `historico_medicoespassagens` (
                                                `IDMedicao` int NOT NULL,
-                                               `Hora` timestamp NULL DEFAULT NULL,
-                                               `SalaOrigem` int NOT NULL,
-                                               `SalaDestino` int NOT NULL,
-                                               `IDMarsami` int NOT NULL,
-                                               `Status` int NOT NULL,
-                                               `IDMongo` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
+                                               `SalaOrigem` int DEFAULT NULL,
+                                               `SalaDestino` int DEFAULT NULL,
+                                               `IDMarsami` int DEFAULT NULL,
+                                               `Status` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
+                                               `IDMongo` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
                                                `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -580,7 +598,7 @@ CREATE TABLE `historico_ocupacaolabirinto` (
 DROP TABLE IF EXISTS `historico_simulacao`;
 CREATE TABLE `historico_simulacao` (
                                        `IDSimulacao` int NOT NULL,
-                                       `Descricao` varchar(255) DEFAULT NULL,
+                                       `Descricao` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
                                        `Equipa` int NOT NULL,
                                        `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                        `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -706,17 +724,6 @@ CREATE TABLE `simulacao` (
                              `Periodicidade` int DEFAULT NULL,
                              `Estado` enum('0','1','2') NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
---
--- Dumping data for table `simulacao`
---
-
-INSERT INTO `simulacao` (`IDSimulacao`, `Descricao`, `Equipa`, `DataHoraInicio`, `DataHoraFim`, `Pontos`, `Criador`, `TempMaxAlerta`, `TempMinAlerta`, `RuidoMaxAlerta`, `SegundosIntervaloAlertas`, `Periodicidade`, `Estado`) VALUES
-                                                                                                                                                                                                                                    (1, 'teste1', 2, '2026-05-11 14:37:01', '2026-05-11 14:37:01', 0.0, 21, 31.00, 18.00, 80.00, 60, 10, '0'),
-                                                                                                                                                                                                                                    (2, 'teste2', 2, '2026-05-11 14:41:04', '2026-05-11 14:52:07', 0.0, 21, 32.00, 18.00, 80.00, 60, 10, '2'),
-                                                                                                                                                                                                                                    (3, 'tatatatta', 2, '2026-05-11 14:52:33', '2026-05-11 14:52:53', 0.0, 21, 30.00, 16.00, 80.00, 60, 10, '2'),
-                                                                                                                                                                                                                                    (4, 'cuodeiotodos', 2, '2026-05-11 14:53:57', '2026-05-11 14:54:55', 0.0, 21, 399.00, -20.00, 80.00, 60, 0, '2'),
-                                                                                                                                                                                                                                    (5, 'simulação do João', 1, '2026-05-11 15:30:12', '2026-05-11 15:30:12', 0.0, 28, 30.00, 18.00, 80.00, 60, 9, '0');
 
 -- --------------------------------------------------------
 
@@ -888,43 +895,43 @@ ALTER TABLE `utilizador`
 -- AUTO_INCREMENT for table `corredor`
 --
 ALTER TABLE `corredor`
-    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `medicoespassagens`
 --
 ALTER TABLE `medicoespassagens`
-    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `mensagens`
 --
 ALTER TABLE `mensagens`
-    MODIFY `ID` int NOT NULL AUTO_INCREMENT;
+    MODIFY `ID` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `simulacao`
 --
 ALTER TABLE `simulacao`
-    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `som`
 --
 ALTER TABLE `som`
-    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `temperatura`
 --
 ALTER TABLE `temperatura`
-    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `utilizador`
 --
 ALTER TABLE `utilizador`
-    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35;
+    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- Constraints for dumped tables

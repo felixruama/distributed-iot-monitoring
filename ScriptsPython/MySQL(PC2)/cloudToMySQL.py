@@ -66,19 +66,21 @@ def preparar_simulacao(id_simulacao_input=None):
         # Determinar qual Simulação usar
         if id_simulacao_input is not None:
             id_simulacao = int(id_simulacao_input)
-            cursor.execute("SELECT Estado FROM simulacao WHERE IDSimulacao = %s", (id_simulacao,))
+            # Verifica se existe E se está no estado 1
+            cursor.execute("SELECT Estado FROM simulacao WHERE IDSimulacao = %s AND Estado = '1'", (id_simulacao,))
             if not cursor.fetchone():
-                print(f"[ERRO] A Simulação ID {id_simulacao} não existe na BD.")
+                print(f"[ERRO] A Simulação ID {id_simulacao} não está ativa (Estado = '1') ou não existe.")
                 return
         else:
-            # Procura automaticamente a última com Estado '0'
-            cursor.execute("SELECT MAX(IDSimulacao) FROM simulacao WHERE Estado = '0'")
+            # Procura automaticamente a simulação que está Ativa (Estado '1')
+            cursor.execute("SELECT IDSimulacao FROM simulacao WHERE Estado = '1' LIMIT 1")
             res = cursor.fetchone()
-            id_simulacao = res[0]
 
-            if id_simulacao is None:
-                print("[ERRO] Nenhuma simulação no estado 'Criada' (0) foi encontrada.")
+            if res is None or res[0] is None:
+                print("[ERRO] Nenhuma simulação no estado 'A decorrer' (1) foi encontrada. Inicie a simulação primeiro.")
                 return
+
+            id_simulacao = res[0]
 
         print(f"[SETUP] A configurar Simulação ID: {id_simulacao}...")
 
