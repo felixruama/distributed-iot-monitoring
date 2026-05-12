@@ -2,68 +2,86 @@ import os
 import sys
 import platform
 import subprocess
+import argparse
 
-# fazer: pip install paho-mqtt pymongo mysql-connector-python python-dotenv
 
-def abrir_novo_terminal(caminho_script):
-    """Abre um script Python numa nova janela de terminal, dependendo do Sistema Operativo."""
+def abrir_novo_terminal(caminho_script, argumentos_extra=None):
+    """Abre um script Python numa nova janela de terminal, passando os argumentos opcionais."""
+    if argumentos_extra is None:
+        argumentos_extra = []
+
     os_name = platform.system()
-    python_exe = sys.executable  # Usa o Python da tua .venv automaticamente!
+    python_exe = sys.executable
 
     if os_name == "Windows":
-        # No Windows, usamos a flag para criar uma consola nova independente
-        subprocess.Popen([python_exe, caminho_script], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        comando = [python_exe, caminho_script] + argumentos_extra
+        subprocess.Popen(comando, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     elif os_name == "Darwin":  # macOS
-        # ATUALIZADO: Usamos plicas (') para envolver os caminhos, é mais seguro no bash/zsh do Mac
-        comando_shell = f"'{python_exe}' '{caminho_script}'"
+        # Monta os argumentos separados por espaço com plicas para segurança
+        str_args = " ".join([f"'{arg}'" for arg in argumentos_extra])
+        comando_shell = f"'{python_exe}' '{caminho_script}' {str_args}"
         script_mac = f'''
         tell application "Terminal"
             activate
             do script "{comando_shell}"
         end tell
         '''
-        # run em vez de Popen para garantir que o AppleScript é executado corretamente
         subprocess.run(["osascript", "-e", script_mac])
 
     else:
         # Linux
-        subprocess.Popen(["gnome-terminal", "--", python_exe, caminho_script])
+        comando = ["gnome-terminal", "--", python_exe, caminho_script] + argumentos_extra
+        subprocess.Popen(comando)
 
 
 def main():
-    # 1. Descobrir dinamicamente onde este ficheiro (launcher) está guardado
+    # 1. Preparar o Argparse para ler as opções diretamente do terminal principal
+    parser = argparse.ArgumentParser(description="LAUNCHER DE SCRIPTS - PISID 2026")
+    parser.add_argument('--op', type=str, choices=['1', '2'], help="Opção a executar (1: PC1, 2: PC2)")
+    parser.add_argument('--broker', type=str, default="broker.hivemq.com:1883",
+                        help="Endereço do Broker MQTT (ex: host:porta)")
+    parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true",
+                        help="URI do MongoDB")
+    args = parser.parse_args()
+
     pasta_atual = os.path.dirname(os.path.abspath(__file__))
 
-    # 2. Construir os caminhos exatos para os scripts
     path_to_mongo = os.path.join(pasta_atual, "Mongo(PC1)", "to_mongo.py")
     path_mongo_mqtt = os.path.join(pasta_atual, "Mongo(PC1)", "MongoToMQTT.py")
     path_mqtt_mysql = os.path.join(pasta_atual, "MySQL(PC2)", "MQTTToMySQL.py")
+    path_vigilante = os.path.join(pasta_atual, "vigilante_windows.py")
 
-    # 3. Menu na consola
-    print("===========================================")
-    print("      LAUNCHER DE SCRIPTS - PISID 2026     ")
-    print("===========================================")
-    print("1 - Iniciar Scripts PC1 (to_mongo + MongoToMQTT)")
-    print("2 - Iniciar Script PC2 (MQTTToMySQL)")
-    print("===========================================")
-
-    escolha = input("Escolha uma opção (1 ou 2): ")
+    # Se o utilizador não passou o "--op" no terminal, pergunta interativamente!
+    escolha = args.op
+    if not escolha:
+        print("===========================================")
+        print("      LAUNCHER DE SCRIPTS - PISID 2026     ")
+        print(f" Broker padrão: {args.broker}")
+        print(f" Mongo padrão:  {args.mongo}")
+        print("===========================================")
+        print("1 - Iniciar Scripts PC1 (to_mongo + MongoToMQTT)")
+        print("2 - Iniciar Script PC2 (MQTTToMySQL + Vigilante)")
+        print("===========================================")
+        escolha = input("Escolha uma opção (1 ou 2): ")
 
     # 4. Lógica de execução
     if escolha == '1':
-        print("\nA abrir o 'to_mongo.py' e o 'MongoToMQTT.py' em terminais separados...")
-        abrir_novo_terminal(path_to_mongo)
-        abrir_novo_terminal(path_mongo_mqtt)
-        print("Feito! Podes fechar esta janela do PyCharm se quiseres.")
+        print("\nA abrir os terminais do PC1 com as configurações passadas...")
+        args_pc1 = ['--broker', args.broker, '--mongo', args.mongo]
+        abrir_novo_terminal(path_to_mongo, args_pc1)
+        abrir_novo_terminal(path_mongo_mqtt, args_pc1)
+        print("Feito!")
 
     elif escolha == '2':
-        print("\nA abrir o 'MQTTToMySQL.py' num novo terminal...")
-        abrir_novo_terminal(path_mqtt_mysql)
-        print("Feito! Podes fechar esta janela do PyCharm se quiseres.")
+        print("\nA abrir os terminais do PC2 (Migrador + Vigilante) com as configurações passadas...")
+        args_pc2 = ['--broker', args.broker]
+        abrir_novo_terminal(path_mqtt_mysql, args_pc2)
+        abrir_novo_terminal(path_vigilante, args_pc2)  # O Vigilante arranca junto!
+        print("Feito!")
 
     else:
-        print("\nErro: Opção inválida. Corre o script novamente.")
+        print("\nErro: Opção inválida.")
 
 
 if __name__ == "__main__":
