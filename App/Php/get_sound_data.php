@@ -4,7 +4,7 @@ include 'db_config.php';
 
 $sql = "SELECT IDSom as idsom, Som as som 
         FROM som 
-        ORDER BY IDSom DESC LIMIT 20";
+        ORDER BY Hora DESC LIMIT 20";
 
 $result = $conn->query($sql);
 $lista = [];

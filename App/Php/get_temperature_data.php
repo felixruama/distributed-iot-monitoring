@@ -27,7 +27,7 @@ if ($conn->connect_error) {
 }
 
 // A nossa query que sabemos que funciona bem com os nomes corretos
-$sql = "SELECT IDTemperatura as idtemperatura, Temperatura as temperatura FROM temperatura ORDER BY IDTemperatura ASC";
+$sql = "SELECT IDTemperatura as idtemperatura, Temperatura as temperatura FROM temperatura ORDER BY Hora ASC";
 $result = $conn->query($sql);
 
 if ($result) {
