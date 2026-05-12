@@ -243,6 +243,7 @@ ALTER TABLE som AUTO_INCREMENT = 1;
 ALTER TABLE temperatura AUTO_INCREMENT = 1;
 ALTER TABLE medicoespassagens AUTO_INCREMENT = 1;
 ALTER TABLE corredor AUTO_INCREMENT = 1;
+ALTER TABLE mensagens AUTO_INCREMENT = 1;
 
 SELECT 'SUCESSO: Simulação iniciada, histórico salvo e todos os IDs repostos a 1!' AS Resultado;
 
