@@ -894,43 +894,43 @@ ALTER TABLE `utilizador`
 -- AUTO_INCREMENT for table `corredor`
 --
 ALTER TABLE `corredor`
-    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=61;
+    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `medicoespassagens`
 --
 ALTER TABLE `medicoespassagens`
-    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=192;
+    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `mensagens`
 --
 ALTER TABLE `mensagens`
-    MODIFY `ID` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
+    MODIFY `ID` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `simulacao`
 --
 ALTER TABLE `simulacao`
-    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `som`
 --
 ALTER TABLE `som`
-    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=248;
+    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `temperatura`
 --
 ALTER TABLE `temperatura`
-    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=226;
+    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- AUTO_INCREMENT for table `utilizador`
 --
 ALTER TABLE `utilizador`
-    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35;
+    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
 -- Constraints for dumped tables
