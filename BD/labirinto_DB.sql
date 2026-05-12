@@ -3,10 +3,11 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Tempo de geração: 11-Maio-2026 às 15:48
--- Versão do servidor: 8.0.45
--- versão do PHP: 8.3.30
+-- Generation Time: May 12, 2026 at 12:22 PM
+-- Server version: 8.0.45
+-- PHP Version: 8.3.30
 
+SET FOREIGN_KEY_CHECKS=0;
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
@@ -18,14 +19,12 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Base de dados: `labirinto_DB`
+-- Database: `labirinto_DB`
 --
-CREATE DATABASE IF NOT EXISTS `labirinto_DB` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE `labirinto_DB`;
 
 DELIMITER $$
 --
--- Procedimentos
+-- Procedures
 --
 DROP PROCEDURE IF EXISTS `SP_ApagarUtilizador`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_ApagarUtilizador` (IN `p_id` INT)   BEGIN
@@ -44,44 +43,50 @@ CREATE DEFINER=`root`@`%` PROCEDURE `SP_CriarSimulacao` (IN `p_IDUtilizador` INT
     DECLARE v_equipa INT DEFAULT 7;
 
     -- Mantemos a tua lógica de obter a equipa real
-    SELECT Equipa INTO v_equipa FROM utilizador WHERE IDUtilizador = p_IDUtilizador;
+SELECT Equipa INTO v_equipa FROM utilizador WHERE IDUtilizador = p_IDUtilizador;
 
-    IF v_equipa IS NULL OR v_equipa = 0 THEN
+IF v_equipa IS NULL OR v_equipa = 0 THEN
         SET v_equipa = 7;
-    END IF;
+END IF;
 
     -- Inserimos TUDO de uma vez na tabela simulacao (SEM O CAMPO SimulacaoIniciada)
-    INSERT INTO simulacao (
-        Descricao, Equipa, Criador, Pontos, Estado,
-        TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, Periodicidade, SegundosIntervaloAlertas
-    )
-    VALUES (
-        p_Descricao, v_equipa, p_IDUtilizador, 0, '0',
-        p_TempMax, p_TempMin, p_RuidoMax, p_Periodicidade, p_Intervalo
-    );
+INSERT INTO simulacao (
+    Descricao, Equipa, Criador, Pontos, Estado,
+    TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, Periodicidade, SegundosIntervaloAlertas
+)
+VALUES (
+           p_Descricao, v_equipa, p_IDUtilizador, 0, '0',
+           p_TempMax, p_TempMin, p_RuidoMax, p_Periodicidade, p_Intervalo
+       );
 
-    SELECT LAST_INSERT_ID() AS IDSimulacao;
+SELECT LAST_INSERT_ID() AS IDSimulacao;
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_CriarUtilizador`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_CriarUtilizador` (IN `p_Nome` VARCHAR(100), IN `p_Email` VARCHAR(50), IN `p_Password` VARCHAR(255), IN `p_Tipo` VARCHAR(50), IN `p_Telemovel` VARCHAR(12), IN `p_DataNascimento` DATE, IN `p_Equipa` INT)   BEGIN
-    -- 1. Validação de Equipa
+    -- 1. Validação da Equipa
     IF p_Equipa IS NULL OR p_Equipa <= 0 THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: O utilizador tem de pertencer a uma equipa válida (ID > 0).';
-    -- 2. Verificação de Duplicados na Tabela
-    ELSEIF EXISTS (SELECT 1 FROM utilizador WHERE Email = p_Email) THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Email ja registado na tabela.';
-ELSE
-        -- 3. INSERIR NA TABELA
-        INSERT INTO utilizador (Nome, Telemovel, Tipo, Password, Email, DataNascimento, Equipa)
-        VALUES (p_Nome, p_Telemovel, p_Tipo, p_Password, p_Email, p_DataNascimento, p_Equipa);
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: O utilizador tem de pertencer a uma equipa válida.';
 
-        -- 4. CRIAR UTILIZADOR NO MOTOR DO MYSQL
+    -- 2. Validação do Telemóvel (NOVA REGRA)
+    ELSEIF p_Telemovel IS NOT NULL AND p_Telemovel NOT REGEXP '^[0-9]{9}$' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: O número de telemóvel deve conter exatamente 9 dígitos numéricos.';
+
+    -- 3. Verificar se o email já existe
+    ELSEIF EXISTS (SELECT 1 FROM utilizador WHERE Email = p_Email) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Email já registado.';
+
+ELSE
+        -- 4. Inserção segura na Tabela (SEM O CAMPO PASSWORD)
+        INSERT INTO utilizador (Nome, Telemovel, Tipo, Email, DataNascimento, Equipa)
+        VALUES (p_Nome, p_Telemovel, p_Tipo, p_Email, p_DataNascimento, p_Equipa);
+
+        -- 5. Criar utilizador no motor do MySQL (COM A PASSWORD, apenas no sistema do MySQL)
         SET @sql_create = CONCAT('CREATE USER ''', p_Email, '''@''%'' IDENTIFIED BY ''', p_Password, ''';');
 PREPARE stmt_create FROM @sql_create; EXECUTE stmt_create; DEALLOCATE PREPARE stmt_create;
 
--- 5. MATRIZ DE PERMISSÕES DINÂMICA
-SET @db = 'labirinto_DB_ruama';
+-- 6. MATRIZ DE PERMISSÕES DINÂMICA
+SET @db = 'labirinto_DB'; -- O nome da tua base de dados
         SET @usr = CONCAT('''', p_Email, '''@''%''');
 
         IF p_Tipo = 'Admin' THEN
@@ -182,59 +187,59 @@ CREATE DEFINER=`root`@`%` PROCEDURE `SP_IniciarSimulacao` (IN `p_IDSimulacao` IN
     DECLARE v_simulacoes_ativas INT DEFAULT 0;
     DECLARE v_simulacoes_terminadas INT DEFAULT 0;
 
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
-    BEGIN
-        ROLLBACK;
-        RESIGNAL; 
-    END;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+ROLLBACK;
+RESIGNAL;
+END;
 
-    START TRANSACTION;
+START TRANSACTION;
 
-    -- BARREIRA DE SEGURANÇA
-    SELECT COUNT(*) INTO v_simulacoes_ativas FROM simulacao WHERE Estado = '1';
-    
-    IF v_simulacoes_ativas > 0 THEN
+-- BARREIRA DE SEGURANÇA
+SELECT COUNT(*) INTO v_simulacoes_ativas FROM simulacao WHERE Estado = '1';
+
+IF v_simulacoes_ativas > 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Já existe uma simulação a decorrer. Termine-a antes de iniciar uma nova.';
-    END IF;
+END IF;
 
-    -- EXPORTAR DADOS 
-    SELECT COUNT(*) INTO v_simulacoes_terminadas FROM simulacao WHERE Estado = '2';
-    
-    IF v_simulacoes_terminadas > 0 THEN
-        
+    -- EXPORTAR DADOS
+SELECT COUNT(*) INTO v_simulacoes_terminadas FROM simulacao WHERE Estado = '2';
+
+IF v_simulacoes_terminadas > 0 THEN
+
         INSERT INTO historico_simulacao (IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado)
-        SELECT IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado
-        FROM simulacao WHERE Estado = '2';
+SELECT IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado
+FROM simulacao WHERE Estado = '2';
 
-        INSERT INTO historico_medicoespassagens (IDMedicao, Hora, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao)
-        SELECT IDMedicao, DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao
-        FROM medicoespassagens
-        WHERE IDSimulacao IN (SELECT IDSimulacao FROM simulacao WHERE Estado = '2');
+INSERT INTO historico_medicoespassagens (IDMedicao, Hora, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao)
+SELECT IDMedicao, DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao
+FROM medicoespassagens
+WHERE IDSimulacao IN (SELECT IDSimulacao FROM simulacao WHERE Estado = '2');
 
-        INSERT INTO historico_ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao)
-        SELECT NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao
-        FROM ocupacaolabirinto
-        WHERE IDSimulacao IN (SELECT IDSimulacao FROM simulacao WHERE Estado = '2');
+INSERT INTO historico_ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao)
+SELECT NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao
+FROM ocupacaolabirinto
+WHERE IDSimulacao IN (SELECT IDSimulacao FROM simulacao WHERE Estado = '2');
 
-        -- LIMPEZA DAS TABELAS "VIVAS"
-        DELETE FROM som;
-        DELETE FROM temperatura;
-        DELETE FROM simulacao WHERE Estado = '2';
+-- LIMPEZA DAS TABELAS "VIVAS"
+DELETE FROM som;
+DELETE FROM temperatura;
+DELETE FROM simulacao WHERE Estado = '2';
 
-    END IF;
+END IF;
 
-    -- INICIAR A NOVA SIMULAÇÃO 
-    UPDATE simulacao 
-    SET Estado = '1', DataHoraInicio = CURRENT_TIMESTAMP
-    WHERE IDSimulacao = p_IDSimulacao;
-    
-    IF ROW_COUNT() = 0 THEN
+    -- INICIAR A NOVA SIMULAÇÃO
+UPDATE simulacao
+SET Estado = '1', DataHoraInicio = CURRENT_TIMESTAMP
+WHERE IDSimulacao = p_IDSimulacao;
+
+IF ROW_COUNT() = 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Simulação não encontrada.';
-    END IF;
+END IF;
 
-    COMMIT;
-    
-    SELECT 'SUCESSO: Simulação iniciada. Tabela de histórico atualizada e lixo limpo!' AS Resultado;
+COMMIT;
+
+SELECT 'SUCESSO: Simulação iniciada. Tabela de histórico atualizada e lixo limpo!' AS Resultado;
 
 END$$
 
@@ -339,40 +344,40 @@ CREATE DEFINER=`root`@`%` PROCEDURE `SP_RegistarPassagem` (IN `p_id_simulacao` I
     -- O "AIRBAG": Cancela tudo se houver falha a meio do processo!
     -- =========================================================================
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        RESIGNAL;
-    END;
+BEGIN
+ROLLBACK;
+RESIGNAL;
+END;
 
     -- Iniciar o modo "Tudo ou Nada"
-    START TRANSACTION;
+START TRANSACTION;
 
-    -- Determinar se o Marsami é Ímpar (1) ou Par (0)
-    SET v_parity = p_id_marsami % 2;
+-- Determinar se o Marsami é Ímpar (1) ou Par (0)
+SET v_parity = p_id_marsami % 2;
 
     -- 1. Registar a passagem
-    INSERT INTO medicoespassagens (DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDSimulacao, IDMongo)
-    VALUES (NOW(), p_origem, p_destino, p_id_marsami, p_status, p_id_simulacao, p_idmongo);
+INSERT INTO medicoespassagens (SalaOrigem, SalaDestino, IDMarsami, Status, IDSimulacao, IDMongo)
+VALUES (p_origem, p_destino, p_id_marsami, p_status, p_id_simulacao, p_idmongo);
 
-    -- 2. Retirar o Marsami da sala de ORIGEM
-    IF v_parity = 1 THEN
-        UPDATE ocupacaolabirinto SET NumeroMarsamisOdd = GREATEST(NumeroMarsamisOdd - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
-    ELSE
-        UPDATE ocupacaolabirinto SET NumeroMarsamisEven = GREATEST(NumeroMarsamisEven - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
-    END IF;
+-- 2. Retirar o Marsami da sala de ORIGEM
+IF v_parity = 1 THEN
+UPDATE ocupacaolabirinto SET NumeroMarsamisOdd = GREATEST(NumeroMarsamisOdd - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
+ELSE
+UPDATE ocupacaolabirinto SET NumeroMarsamisEven = GREATEST(NumeroMarsamisEven - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
+END IF;
 
     -- 3. Adicionar o Marsami à sala de DESTINO
     IF v_parity = 1 THEN
         INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (1, 0, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisOdd = NumeroMarsamisOdd + 1;
-    ELSE
+ELSE
         INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (0, 1, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisEven = NumeroMarsamisEven + 1;
-    END IF;
+END IF;
 
     -- 4. Atualizar a localização e o estado Cansado do Marsami
-    UPDATE marsami SET IDSala = p_destino, Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
+UPDATE marsami SET IDSala = p_destino, Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
 
-    -- Se chegou aqui sem crashar, grava definitivamente as 4 alterações ao mesmo tempo!
-    COMMIT;
+-- Se chegou aqui sem crashar, grava definitivamente as 4 alterações ao mesmo tempo!
+COMMIT;
 
 END$$
 
@@ -381,40 +386,11 @@ CREATE DEFINER=`root`@`%` PROCEDURE `SP_TerminarSimulacao` (IN `p_id_simulacao` 
 UPDATE simulacao SET Estado = '2', DataHoraFim = CURRENT_TIMESTAMP WHERE IDSimulacao = p_id_simulacao;
 END$$
 
-DROP PROCEDURE IF EXISTS `SP_ValidarACESSO`$$
-CREATE DEFINER=`root`@`%` PROCEDURE `SP_ValidarACESSO` (IN `p_Email` VARCHAR(50))   BEGIN
-    -- Se chegou aqui, é porque a password na mysql.user já foi validada pela ligação.
-    -- Agora apenas verificamos se o utilizador existe na nossa tabela de controlo.
-    IF EXISTS (SELECT 1 FROM utilizador WHERE Email = p_Email) THEN
-        SELECT IDUtilizador, Nome, Tipo, Equipa 
-        FROM utilizador 
-        WHERE Email = p_Email;
-    ELSE
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Utilizador não autorizado na aplicação.';
-    END IF;
-END$$
-
 DROP PROCEDURE IF EXISTS `SP_ValidarLogin`$$
-CREATE DEFINER=`root`@`%` PROCEDURE `SP_ValidarLogin` (IN `p_Email` VARCHAR(50), IN `p_Password` VARCHAR(255))   BEGIN
-    DECLARE v_Existe INT;
-    DECLARE v_Equipa INT;
-    DECLARE v_ID INT; -- Nova variável para guardar o ID
-
-    -- Descobre se existe e guarda o ID e a Equipa nas variáveis
-SELECT COUNT(*), MAX(IDUtilizador), MAX(Equipa) INTO v_Existe, v_ID, v_Equipa
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_ValidarLogin` (IN `p_Email` VARCHAR(50))   BEGIN
+SELECT IDUtilizador, Nome, Email, Tipo, Equipa
 FROM utilizador
-WHERE Email = p_Email AND Password = SHA2(p_Password, 256);
-
-IF v_Existe = 1 THEN
-        -- AGORA SIM: Devolvemos também o IDUtilizador!
-SELECT
-    'Sucesso: Login válido' AS Mensagem,
-    p_Email AS Email,
-    v_Equipa AS Equipa,
-    v_ID AS IDUtilizador;
-ELSE
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Credenciais inválidas.';
-END IF;
+WHERE Email = p_Email;
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_ValidarParametros`$$
@@ -532,18 +508,16 @@ DELIMITER ;
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `corredor`
+-- Table structure for table `corredor`
 --
 
 DROP TABLE IF EXISTS `corredor`;
-CREATE TABLE IF NOT EXISTS `corredor` (
-  `IDCorredor` int NOT NULL AUTO_INCREMENT,
-  `Aberto` tinyint(1) NOT NULL,
-  `IDSalaA` int NOT NULL,
-  `IDSalaB` int NOT NULL,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`IDCorredor`),
-  KEY `fk_corredor_simulacao` (`IDSimulacao`)
+CREATE TABLE `corredor` (
+                            `IDCorredor` int NOT NULL,
+                            `Aberto` tinyint(1) NOT NULL,
+                            `IDSalaA` int NOT NULL,
+                            `IDSalaB` int NOT NULL,
+                            `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -568,82 +542,71 @@ DELIMITER ;
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `historico_medicoespassagens`
+-- Table structure for table `historico_medicoespassagens`
 --
 
 DROP TABLE IF EXISTS `historico_medicoespassagens`;
-CREATE TABLE IF NOT EXISTS `historico_medicoespassagens` (
-  `IDMedicao` int NOT NULL,
-  `Hora` timestamp NULL DEFAULT NULL,
-  `SalaOrigem` int NOT NULL,
-  `SalaDestino` int NOT NULL,
-  `IDMarsami` int NOT NULL,
-  `Status` int NOT NULL,
-  `IDMongo` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`IDMedicao`,`IDSimulacao`),
-  KEY `fk_passagens_simulacao` (`IDSimulacao`),
-  KEY `fk_passagens_salaO` (`SalaOrigem`),
-  KEY `fk_passagens_salaD` (`SalaDestino`),
-  KEY `fk_passagens_marsami` (`IDMarsami`)
+CREATE TABLE `historico_medicoespassagens` (
+                                               `IDMedicao` int NOT NULL,
+                                               `Hora` timestamp NULL DEFAULT NULL,
+                                               `SalaOrigem` int NOT NULL,
+                                               `SalaDestino` int NOT NULL,
+                                               `IDMarsami` int NOT NULL,
+                                               `Status` int NOT NULL,
+                                               `IDMongo` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
+                                               `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `historico_ocupacaolabirinto`
+-- Table structure for table `historico_ocupacaolabirinto`
 --
 
 DROP TABLE IF EXISTS `historico_ocupacaolabirinto`;
-CREATE TABLE IF NOT EXISTS `historico_ocupacaolabirinto` (
-  `NumeroMarsamisOdd` int NOT NULL,
-  `NumeroMarsamisEven` int NOT NULL,
-  `Sala` int NOT NULL,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`Sala`,`IDSimulacao`),
-  KEY `fk_ocupacao_sala` (`Sala`),
-  KEY `fk_ocupacao_simulacao` (`IDSimulacao`)
+CREATE TABLE `historico_ocupacaolabirinto` (
+                                               `NumeroMarsamisOdd` int NOT NULL,
+                                               `NumeroMarsamisEven` int NOT NULL,
+                                               `Sala` int NOT NULL,
+                                               `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `historico_simulacao`
+-- Table structure for table `historico_simulacao`
 --
 
 DROP TABLE IF EXISTS `historico_simulacao`;
-CREATE TABLE IF NOT EXISTS `historico_simulacao` (
-  `IDSimulacao` int NOT NULL,
-  `Descricao` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `Equipa` int NOT NULL,
-  `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `Pontos` int DEFAULT NULL,
-  `Criador` int NOT NULL DEFAULT '0',
-  `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
-  `TempMinAlerta` decimal(6,2) DEFAULT NULL,
-  `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
-  `SegundosIntervaloAlertas` int DEFAULT '60',
-  `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
-  `Periodicidade` int DEFAULT NULL,
-  `Estado` enum('0','1','2') NOT NULL DEFAULT '0',
-  PRIMARY KEY (`IDSimulacao`)
+CREATE TABLE `historico_simulacao` (
+                                       `IDSimulacao` int NOT NULL,
+                                       `Descricao` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                                       `Equipa` int NOT NULL,
+                                       `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                       `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                       `Pontos` int DEFAULT NULL,
+                                       `Criador` int NOT NULL DEFAULT '0',
+                                       `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
+                                       `TempMinAlerta` decimal(6,2) DEFAULT NULL,
+                                       `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
+                                       `SegundosIntervaloAlertas` int DEFAULT '60',
+                                       `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
+                                       `Periodicidade` int DEFAULT NULL,
+                                       `Estado` enum('0','1','2') NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `marsami`
+-- Table structure for table `marsami`
 --
 
 DROP TABLE IF EXISTS `marsami`;
-CREATE TABLE IF NOT EXISTS `marsami` (
-  `IDMarsami` int NOT NULL,
-  `Cansado` tinyint(1) NOT NULL,
-  `IDSala` int NOT NULL,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`IDMarsami`),
-  KEY `fk_marsami_simulacao` (`IDSimulacao`)
+CREATE TABLE `marsami` (
+                           `IDMarsami` int NOT NULL,
+                           `Cansado` tinyint(1) NOT NULL,
+                           `IDSala` int NOT NULL,
+                           `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -658,16 +621,16 @@ CREATE TRIGGER `trg_Verificar_Cansados` AFTER UPDATE ON `marsami` FOR EACH ROW B
     IF NEW.Cansado = 1 AND OLD.Cansado = 0 THEN
 
         -- Contamos quantos Marsamis ainda NÃO estão cansados nesta simulação
-        SELECT COUNT(*) INTO v_nao_cansados
-        FROM marsami
-        WHERE IDSimulacao = OLD.IDSimulacao AND Cansado = 0;
+    SELECT COUNT(*) INTO v_nao_cansados
+    FROM marsami
+    WHERE IDSimulacao = OLD.IDSimulacao AND Cansado = 0;
 
-        -- Se não sobrar nenhum robô ativo, chamamos a SP para terminar a simulação!
-        IF v_nao_cansados = 0 THEN
+    -- Se não sobrar nenhum robô ativo, chamamos a SP para terminar a simulação!
+    IF v_nao_cansados = 0 THEN
             CALL SP_TerminarSimulacao(OLD.IDSimulacao);
-        END IF;
+END IF;
 
-    END IF;
+END IF;
 END
 $$
 DELIMITER ;
@@ -675,201 +638,338 @@ DELIMITER ;
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `medicoespassagens`
+-- Table structure for table `medicoespassagens`
 --
 
 DROP TABLE IF EXISTS `medicoespassagens`;
-CREATE TABLE IF NOT EXISTS `medicoespassagens` (
-  `IDMedicao` int NOT NULL AUTO_INCREMENT,
-  `IDSimulacao` int NOT NULL,
-  `IDMarsami` int DEFAULT NULL,
-  `SalaOrigem` int DEFAULT NULL,
-  `SalaDestino` int DEFAULT NULL,
-  `Status` varchar(50) DEFAULT NULL,
-  `IDMongo` varchar(50) DEFAULT NULL,
-  `DataMedicao` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`IDMedicao`),
-  KEY `fk_passagens_simulacao_ref` (`IDSimulacao`),
-  KEY `fk_passagens_marsami_ref` (`IDMarsami`)
+CREATE TABLE `medicoespassagens` (
+                                     `IDMedicao` int NOT NULL,
+                                     `IDSimulacao` int NOT NULL,
+                                     `IDMarsami` int DEFAULT NULL,
+                                     `SalaOrigem` int DEFAULT NULL,
+                                     `SalaDestino` int DEFAULT NULL,
+                                     `Status` varchar(50) DEFAULT NULL,
+                                     `IDMongo` varchar(50) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `mensagens`
+-- Table structure for table `mensagens`
 --
 
 DROP TABLE IF EXISTS `mensagens`;
-CREATE TABLE IF NOT EXISTS `mensagens` (
-  `ID` int NOT NULL AUTO_INCREMENT,
-  `Hora` varchar(50) DEFAULT NULL,
-  `Sensor` varchar(10) DEFAULT NULL,
-  `Leitura` decimal(6,2) DEFAULT NULL,
-  `TipoAlerta` varchar(50) DEFAULT NULL,
-  `Msg` text,
-  `HoraEscrita` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`ID`),
-  KEY `fk_mensagens_simulacao` (`IDSimulacao`)
+CREATE TABLE `mensagens` (
+                             `ID` int NOT NULL,
+                             `Hora` varchar(50) DEFAULT NULL,
+                             `Sensor` varchar(10) DEFAULT NULL,
+                             `Leitura` decimal(6,2) DEFAULT NULL,
+                             `TipoAlerta` varchar(50) DEFAULT NULL,
+                             `Msg` text,
+                             `HoraEscrita` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                             `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `ocupacaolabirinto`
+-- Table structure for table `ocupacaolabirinto`
 --
 
 DROP TABLE IF EXISTS `ocupacaolabirinto`;
-CREATE TABLE IF NOT EXISTS `ocupacaolabirinto` (
-  `NumeroMarsamisOdd` int NOT NULL,
-  `NumeroMarsamisEven` int NOT NULL,
-  `Sala` int NOT NULL,
-  `IDSimulacao` int NOT NULL,
-  PRIMARY KEY (`Sala`,`IDSimulacao`),
-  KEY `fk_ocupacao_simulacao` (`IDSimulacao`)
+CREATE TABLE `ocupacaolabirinto` (
+                                     `NumeroMarsamisOdd` int NOT NULL,
+                                     `NumeroMarsamisEven` int NOT NULL,
+                                     `Sala` int NOT NULL,
+                                     `IDSimulacao` int NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `simulacao`
+-- Table structure for table `simulacao`
 --
 
 DROP TABLE IF EXISTS `simulacao`;
-CREATE TABLE IF NOT EXISTS `simulacao` (
-  `IDSimulacao` int NOT NULL AUTO_INCREMENT,
-  `Descricao` varchar(255) DEFAULT NULL,
-  `Equipa` int NOT NULL,
-  `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `Pontos` decimal(6,1) DEFAULT NULL,
-  `Criador` int NOT NULL,
-  `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
-  `TempMinAlerta` decimal(6,2) DEFAULT NULL,
-  `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
-  `SegundosIntervaloAlertas` int DEFAULT '60',
-  `Periodicidade` int DEFAULT NULL,
-  `Estado` enum('0','1','2') NOT NULL DEFAULT '0',
-  PRIMARY KEY (`IDSimulacao`),
-  KEY `fk_simulacao_criador` (`Criador`)
+CREATE TABLE `simulacao` (
+                             `IDSimulacao` int NOT NULL,
+                             `Descricao` varchar(255) DEFAULT NULL,
+                             `Equipa` int NOT NULL,
+                             `DataHoraInicio` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                             `DataHoraFim` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                             `Pontos` decimal(6,1) DEFAULT NULL,
+                             `Criador` int NOT NULL,
+                             `TempMaxAlerta` decimal(6,2) DEFAULT NULL,
+                             `TempMinAlerta` decimal(6,2) DEFAULT NULL,
+                             `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
+                             `SegundosIntervaloAlertas` int DEFAULT '60',
+                             `Periodicidade` int DEFAULT NULL,
+                             `Estado` enum('0','1','2') NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data for table `simulacao`
+--
+
+INSERT INTO `simulacao` (`IDSimulacao`, `Descricao`, `Equipa`, `DataHoraInicio`, `DataHoraFim`, `Pontos`, `Criador`, `TempMaxAlerta`, `TempMinAlerta`, `RuidoMaxAlerta`, `SegundosIntervaloAlertas`, `Periodicidade`, `Estado`) VALUES
+                                                                                                                                                                                                                                    (1, 'teste1', 2, '2026-05-11 14:37:01', '2026-05-11 14:37:01', 0.0, 21, 31.00, 18.00, 80.00, 60, 10, '0'),
+                                                                                                                                                                                                                                    (2, 'teste2', 2, '2026-05-11 14:41:04', '2026-05-11 14:52:07', 0.0, 21, 32.00, 18.00, 80.00, 60, 10, '2'),
+                                                                                                                                                                                                                                    (3, 'tatatatta', 2, '2026-05-11 14:52:33', '2026-05-11 14:52:53', 0.0, 21, 30.00, 16.00, 80.00, 60, 10, '2'),
+                                                                                                                                                                                                                                    (4, 'cuodeiotodos', 2, '2026-05-11 14:53:57', '2026-05-11 14:54:55', 0.0, 21, 399.00, -20.00, 80.00, 60, 0, '2'),
+                                                                                                                                                                                                                                    (5, 'simulação do João', 1, '2026-05-11 15:30:12', '2026-05-11 15:30:12', 0.0, 28, 30.00, 18.00, 80.00, 60, 9, '0');
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `som`
+-- Table structure for table `som`
 --
 
 DROP TABLE IF EXISTS `som`;
-CREATE TABLE IF NOT EXISTS `som` (
-  `IDSom` int NOT NULL AUTO_INCREMENT,
-  `Hora` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `Som` decimal(6,2) NOT NULL,
-  PRIMARY KEY (`IDSom`)
+CREATE TABLE `som` (
+                       `IDSom` int NOT NULL,
+                       `Hora` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                       `Som` decimal(6,2) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `temperatura`
+-- Table structure for table `temperatura`
 --
 
 DROP TABLE IF EXISTS `temperatura`;
-CREATE TABLE IF NOT EXISTS `temperatura` (
-  `IDTemperatura` int NOT NULL AUTO_INCREMENT,
-  `Hora` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `Temperatura` decimal(6,2) NOT NULL,
-  PRIMARY KEY (`IDTemperatura`)
+CREATE TABLE `temperatura` (
+                               `IDTemperatura` int NOT NULL,
+                               `Hora` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                               `Temperatura` decimal(6,2) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
 --
--- Estrutura da tabela `utilizador`
+-- Table structure for table `utilizador`
 --
 
 DROP TABLE IF EXISTS `utilizador`;
-CREATE TABLE IF NOT EXISTS `utilizador` (
-  `IDUtilizador` int NOT NULL AUTO_INCREMENT,
-  `Nome` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `Telemovel` varchar(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
-  `Tipo` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `Email` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `DataNascimento` date DEFAULT NULL,
-  `Equipa` int NOT NULL,
-  PRIMARY KEY (`IDUtilizador`)
-) ENGINE=InnoDB AUTO_INCREMENT=28 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE `utilizador` (
+                              `IDUtilizador` int NOT NULL,
+                              `Nome` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+                              `Telemovel` varchar(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+                              `Tipo` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+                              `Email` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+                              `DataNascimento` date DEFAULT NULL,
+                              `Equipa` int NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
--- Extraindo dados da tabela `utilizador`
+-- Dumping data for table `utilizador`
 --
 
 INSERT INTO `utilizador` (`IDUtilizador`, `Nome`, `Telemovel`, `Tipo`, `Email`, `DataNascimento`, `Equipa`) VALUES
-(1, 'Ana Maria Braga', NULL, '', 'ana@email.com', NULL, 0),
-(2, 'Bruno Ramos', NULL, '', 'bruno@email.com', NULL, 0),
-(3, 'Utilizador PHP 1', NULL, 'web', 'user1_php', NULL, 1),
-(4, 'Utilizador PHP 2', NULL, 'web', 'user2_php', NULL, 2),
-(7, 'ola', NULL, 'web', 'rrlfx@iscte.pt', NULL, 0),
-(9, 'Maria Completa', '912345678', 'web', 'maria@teste.com', '1998-05-20', 0),
-(10, 'Ricardo Tel', '933444555', 'web', 'ric@teste.com', NULL, 0),
-(11, 'Joao Com Equipa', '912345678', 'web', 'joao.equipa@teste.com', '2000-01-01', 1),
-(12, 'teste', '123', 'web', 'teste', '2020-11-11', 7),
-(13, 'Novo Dev', NULL, 'web', 'dev@lab.com', NULL, 1),
-(14, 'ola', '56566565', 'web', 'teste2@iscte.pt', '2020-12-12', 7),
-(15, 'Chefe Supremo', '919999999', 'Admin', 'admin.master@lab.pt', '1980-05-20', 1),
-(17, 'Chefe Supremo', '000000000', 'Admin', 'admin.grande@lab.pt', '1980-07-27', 1),
-(18, 'Teste do Admin: Criar pela SP', NULL, 'Utilizador', 'UserFeitoPorAdim@lab.pt', NULL, 1),
-(19, 'Nome Editado Com Sucesso', NULL, 'Utilizador', 'direto@lab.pt', NULL, 1),
-(21, 'mudei', '037167819', 'Utilizador', 'jogador.teste@lab.pt', '2000-01-07', 2),
-(24, 'Novo Admin Supremo', '999888777', 'Admin', 'admin2@lab.pt', '1990-01-01', 1),
-(25, 'Robo Marsami', NULL, 'Migrador', 'robo.migrador2@lab.pt', NULL, 1),
-(26, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor@lab.pt', NULL, 1),
-(27, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor2@lab.pt', NULL, 1);
+                                                                                                                (1, 'Ana Maria Braga', NULL, '', 'ana@email.com', NULL, 0),
+                                                                                                                (2, 'Bruno Ramos', NULL, '', 'bruno@email.com', NULL, 0),
+                                                                                                                (3, 'Utilizador PHP 1', NULL, 'web', 'user1_php', NULL, 1),
+                                                                                                                (4, 'Utilizador PHP 2', NULL, 'web', 'user2_php', NULL, 2),
+                                                                                                                (7, 'ola', NULL, 'web', 'rrlfx@iscte.pt', NULL, 0),
+                                                                                                                (9, 'Maria Completa', '912345678', 'web', 'maria@teste.com', '1998-05-20', 0),
+                                                                                                                (10, 'Ricardo Tel', '933444555', 'web', 'ric@teste.com', NULL, 0),
+                                                                                                                (11, 'Joao Com Equipa', '912345678', 'web', 'joao.equipa@teste.com', '2000-01-01', 1),
+                                                                                                                (12, 'teste', NULL, 'web', 'teste', '2020-11-11', 7),
+                                                                                                                (13, 'Novo Dev', NULL, 'web', 'dev@lab.com', NULL, 1),
+                                                                                                                (14, 'ola', NULL, 'web', 'teste2@iscte.pt', '2020-12-12', 7),
+                                                                                                                (15, 'Chefe Supremo', '919999999', 'Admin', 'admin.master@lab.pt', '1980-05-20', 1),
+                                                                                                                (17, 'Chefe Supremo', '000000000', 'Admin', 'admin.grande@lab.pt', '1980-07-27', 1),
+                                                                                                                (18, 'Teste do Admin: Criar pela SP', NULL, 'Utilizador', 'UserFeitoPorAdim@lab.pt', NULL, 1),
+                                                                                                                (19, 'Nome Editado Com Sucesso', NULL, 'Utilizador', 'direto@lab.pt', NULL, 1),
+                                                                                                                (21, 'creda', '037167819', 'Utilizador', 'jogador.teste@lab.pt', '2000-01-07', 2),
+                                                                                                                (24, 'Novo Admin Supremo', '999888777', 'Admin', 'admin2@lab.pt', '1990-01-01', 1),
+                                                                                                                (25, 'Robo Marsami', NULL, 'Migrador', 'robo.migrador2@lab.pt', NULL, 1),
+                                                                                                                (26, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor@lab.pt', NULL, 1),
+                                                                                                                (27, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor2@lab.pt', NULL, 1),
+                                                                                                                (28, 'João pinba', '999999999', 'Utilizador', 'joao@lab.pt', '1995-05-19', 1),
+                                                                                                                (32, 'App Android', '910000001', 'Monitor Android', 'android@lab.pt', '2000-01-01', 7),
+                                                                                                                (33, 'Membro da Equipa', '910000002', 'Utilizador', 'equipa@lab.pt', '2000-01-01', 7),
+                                                                                                                (34, 'Script Migrador', '910000003', 'Migrador', 'migrador@lab.pt', '2000-01-01', 7);
 
 --
--- Restrições para despejos de tabelas
+-- Indexes for dumped tables
 --
 
 --
--- Limitadores para a tabela `corredor`
+-- Indexes for table `corredor`
 --
 ALTER TABLE `corredor`
-  ADD CONSTRAINT `fk_corredor_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+    ADD PRIMARY KEY (`IDCorredor`),
+  ADD KEY `fk_corredor_simulacao` (`IDSimulacao`);
 
 --
--- Limitadores para a tabela `marsami`
+-- Indexes for table `historico_medicoespassagens`
+--
+ALTER TABLE `historico_medicoespassagens`
+    ADD PRIMARY KEY (`IDMedicao`,`IDSimulacao`),
+  ADD KEY `fk_passagens_simulacao` (`IDSimulacao`),
+  ADD KEY `fk_passagens_salaO` (`SalaOrigem`),
+  ADD KEY `fk_passagens_salaD` (`SalaDestino`),
+  ADD KEY `fk_passagens_marsami` (`IDMarsami`);
+
+--
+-- Indexes for table `historico_ocupacaolabirinto`
+--
+ALTER TABLE `historico_ocupacaolabirinto`
+    ADD PRIMARY KEY (`Sala`,`IDSimulacao`),
+  ADD KEY `fk_ocupacao_sala` (`Sala`),
+  ADD KEY `fk_ocupacao_simulacao` (`IDSimulacao`);
+
+--
+-- Indexes for table `historico_simulacao`
+--
+ALTER TABLE `historico_simulacao`
+    ADD PRIMARY KEY (`IDSimulacao`);
+
+--
+-- Indexes for table `marsami`
 --
 ALTER TABLE `marsami`
-  ADD CONSTRAINT `fk_marsami_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+    ADD PRIMARY KEY (`IDMarsami`),
+  ADD KEY `fk_marsami_simulacao` (`IDSimulacao`);
 
 --
--- Limitadores para a tabela `medicoespassagens`
+-- Indexes for table `medicoespassagens`
 --
 ALTER TABLE `medicoespassagens`
-  ADD CONSTRAINT `fk_passagens_marsami_ref` FOREIGN KEY (`IDMarsami`) REFERENCES `marsami` (`IDMarsami`) ON DELETE CASCADE ON UPDATE CASCADE,
+    ADD PRIMARY KEY (`IDMedicao`),
+  ADD KEY `fk_passagens_simulacao_ref` (`IDSimulacao`),
+  ADD KEY `fk_passagens_marsami_ref` (`IDMarsami`);
+
+--
+-- Indexes for table `mensagens`
+--
+ALTER TABLE `mensagens`
+    ADD PRIMARY KEY (`ID`),
+  ADD KEY `fk_mensagens_simulacao` (`IDSimulacao`);
+
+--
+-- Indexes for table `ocupacaolabirinto`
+--
+ALTER TABLE `ocupacaolabirinto`
+    ADD PRIMARY KEY (`Sala`,`IDSimulacao`),
+  ADD KEY `fk_ocupacao_simulacao` (`IDSimulacao`);
+
+--
+-- Indexes for table `simulacao`
+--
+ALTER TABLE `simulacao`
+    ADD PRIMARY KEY (`IDSimulacao`),
+  ADD KEY `fk_simulacao_criador` (`Criador`);
+
+--
+-- Indexes for table `som`
+--
+ALTER TABLE `som`
+    ADD PRIMARY KEY (`IDSom`);
+
+--
+-- Indexes for table `temperatura`
+--
+ALTER TABLE `temperatura`
+    ADD PRIMARY KEY (`IDTemperatura`);
+
+--
+-- Indexes for table `utilizador`
+--
+ALTER TABLE `utilizador`
+    ADD PRIMARY KEY (`IDUtilizador`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `corredor`
+--
+ALTER TABLE `corredor`
+    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `medicoespassagens`
+--
+ALTER TABLE `medicoespassagens`
+    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `mensagens`
+--
+ALTER TABLE `mensagens`
+    MODIFY `ID` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `simulacao`
+--
+ALTER TABLE `simulacao`
+    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+
+--
+-- AUTO_INCREMENT for table `som`
+--
+ALTER TABLE `som`
+    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `temperatura`
+--
+ALTER TABLE `temperatura`
+    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `utilizador`
+--
+ALTER TABLE `utilizador`
+    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35;
+
+--
+-- Constraints for dumped tables
+--
+
+--
+-- Constraints for table `corredor`
+--
+ALTER TABLE `corredor`
+    ADD CONSTRAINT `fk_corredor_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Constraints for table `marsami`
+--
+ALTER TABLE `marsami`
+    ADD CONSTRAINT `fk_marsami_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Constraints for table `medicoespassagens`
+--
+ALTER TABLE `medicoespassagens`
+    ADD CONSTRAINT `fk_passagens_marsami_ref` FOREIGN KEY (`IDMarsami`) REFERENCES `marsami` (`IDMarsami`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_passagens_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 --
--- Limitadores para a tabela `mensagens`
+-- Constraints for table `mensagens`
 --
 ALTER TABLE `mensagens`
-  ADD CONSTRAINT `fk_mensagens_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+    ADD CONSTRAINT `fk_mensagens_simulacao` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 --
--- Limitadores para a tabela `ocupacaolabirinto`
+-- Constraints for table `ocupacaolabirinto`
 --
 ALTER TABLE `ocupacaolabirinto`
-  ADD CONSTRAINT `fk_ocupacao_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
+    ADD CONSTRAINT `fk_ocupacao_simulacao_ref` FOREIGN KEY (`IDSimulacao`) REFERENCES `simulacao` (`IDSimulacao`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 --
--- Limitadores para a tabela `simulacao`
+-- Constraints for table `simulacao`
 --
 ALTER TABLE `simulacao`
-  ADD CONSTRAINT `fk_simulacao_criador_ref` FOREIGN KEY (`Criador`) REFERENCES `utilizador` (`IDUtilizador`) ON DELETE CASCADE ON UPDATE CASCADE;
+    ADD CONSTRAINT `fk_simulacao_criador_ref` FOREIGN KEY (`Criador`) REFERENCES `utilizador` (`IDUtilizador`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 DELIMITER $$
 --
--- Eventos
+-- Events
 --
 DROP EVENT IF EXISTS `evt_Exportar_Historico_CSV`$$
 CREATE DEFINER=`root`@`%` EVENT `evt_Exportar_Historico_CSV` ON SCHEDULE EVERY 1 MONTH STARTS '2026-06-01 00:00:00' ON COMPLETION NOT PRESERVE ENABLE DO BEGIN
@@ -879,36 +979,37 @@ CREATE DEFINER=`root`@`%` EVENT `evt_Exportar_Historico_CSV` ON SCHEDULE EVERY 1
     -- =========================================================================
     -- PASSO A: EXPORTAR PARA CSV (Usando nomes de ficheiros dinâmicos)
     -- =========================================================================
-    
+
     -- 1. Backup: Ocupação Labirinto
     SET @query1 = CONCAT('SELECT * INTO OUTFILE ''/var/lib/mysql-files/historico_ocupacao_', @data_atual, '.csv'' FIELDS TERMINATED BY '','' ENCLOSED BY ''"'' LINES TERMINATED BY ''\n'' FROM historico_ocupacaolabirinto');
-    PREPARE stmt1 FROM @query1;
-    EXECUTE stmt1;
-    DEALLOCATE PREPARE stmt1;
+PREPARE stmt1 FROM @query1;
+EXECUTE stmt1;
+DEALLOCATE PREPARE stmt1;
 
-    -- 2. Backup: Medições Passagens
-    SET @query2 = CONCAT('SELECT * INTO OUTFILE ''/var/lib/mysql-files/historico_medicoes_', @data_atual, '.csv'' FIELDS TERMINATED BY '','' ENCLOSED BY ''"'' LINES TERMINATED BY ''\n'' FROM historico_medicoespassagens');
-    PREPARE stmt2 FROM @query2;
-    EXECUTE stmt2;
-    DEALLOCATE PREPARE stmt2;
+-- 2. Backup: Medições Passagens
+SET @query2 = CONCAT('SELECT * INTO OUTFILE ''/var/lib/mysql-files/historico_medicoes_', @data_atual, '.csv'' FIELDS TERMINATED BY '','' ENCLOSED BY ''"'' LINES TERMINATED BY ''\n'' FROM historico_medicoespassagens');
+PREPARE stmt2 FROM @query2;
+EXECUTE stmt2;
+DEALLOCATE PREPARE stmt2;
 
-    -- 3. Backup: Simulação
-    SET @query3 = CONCAT('SELECT * INTO OUTFILE ''/var/lib/mysql-files/historico_simulacao_', @data_atual, '.csv'' FIELDS TERMINATED BY '','' ENCLOSED BY ''"'' LINES TERMINATED BY ''\n'' FROM historico_simulacao');
-    PREPARE stmt3 FROM @query3;
-    EXECUTE stmt3;
-    DEALLOCATE PREPARE stmt3;
+-- 3. Backup: Simulação
+SET @query3 = CONCAT('SELECT * INTO OUTFILE ''/var/lib/mysql-files/historico_simulacao_', @data_atual, '.csv'' FIELDS TERMINATED BY '','' ENCLOSED BY ''"'' LINES TERMINATED BY ''\n'' FROM historico_simulacao');
+PREPARE stmt3 FROM @query3;
+EXECUTE stmt3;
+DEALLOCATE PREPARE stmt3;
 
-    -- =========================================================================
-    -- PASSO B: LIMPAR AS TABELAS DE HISTÓRICO APÓS O BACKUP
-    -- =========================================================================
-    
-    TRUNCATE TABLE historico_ocupacaolabirinto;
-    TRUNCATE TABLE historico_medicoespassagens;
-    TRUNCATE TABLE historico_simulacao;
+-- =========================================================================
+-- PASSO B: LIMPAR AS TABELAS DE HISTÓRICO APÓS O BACKUP
+-- =========================================================================
+
+TRUNCATE TABLE historico_ocupacaolabirinto;
+TRUNCATE TABLE historico_medicoespassagens;
+TRUNCATE TABLE historico_simulacao;
 
 END$$
 
 DELIMITER ;
+SET FOREIGN_KEY_CHECKS=1;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
