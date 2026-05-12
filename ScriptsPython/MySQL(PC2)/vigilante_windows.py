@@ -1,92 +1,90 @@
 import os
-import sys
-import platform
+import time
 import subprocess
+import mysql.connector
 import argparse
+import sys
 
+# ==========================================
+# 1. LER ARGUMENTOS OPCIONAIS DA CONSOLA
+# ==========================================
+parser = argparse.ArgumentParser(description="Script: Vigilante do Windows")
+parser.add_argument('--broker', type=str, default="broker.hivemq.com:1883", help="Endereço do Broker MQTT (host:porta)")
+args = parser.parse_args()
 
-def abrir_novo_terminal(caminho_script, argumentos_extra=None):
-    """Abre um script Python numa nova janela de terminal, passando os argumentos opcionais."""
-    if argumentos_extra is None:
-        argumentos_extra = []
+broker_address = args.broker.split(':')[0]
+broker_port = args.broker.split(':')[1] if ':' in args.broker else "1883"
 
-    os_name = platform.system()
-    python_exe = sys.executable
-
-    if os_name == "Windows":
-        # O truque está aqui: o "cmd /k" força a janela do Windows a ficar aberta mesmo se houver erro!
-        comando = ["cmd", "/k", python_exe, caminho_script] + argumentos_extra
-        subprocess.Popen(comando, creationflags=subprocess.CREATE_NEW_CONSOLE)
-
-    elif os_name == "Darwin":  # macOS
-        str_args = " ".join([f"'{arg}'" for arg in argumentos_extra])
-        comando_shell = f"'{python_exe}' '{caminho_script}' {str_args}"
-
-        script_mac = f'''
-        tell application "Terminal"
-            activate
-            do script "{comando_shell}"
-        end tell
-        '''
-        subprocess.run(["osascript", "-e", script_mac])
-
-    else:
-        # Linux (Ubuntu/Debian com gnome-terminal)
-        comando = ["gnome-terminal", "--", python_exe, caminho_script] + argumentos_extra
-        subprocess.Popen(comando)
+# ==========================================
+# 2. CONFIGURAR A LIGAÇÃO À BASE DE DADOS
+# ==========================================
+DB_CONFIG = {
+    'host': 'localhost',  # Corre no teu computador, logo é localhost
+    'user': 'root',
+    'password': 'root',  # Confirma se é esta a tua password
+    'database': 'labirinto_DB'
+}
 
 
 def main():
-    # 1. Preparar o Argparse para ler as opções diretamente do terminal
-    parser = argparse.ArgumentParser(description="LAUNCHER DE SCRIPTS - PISID 2026")
-    parser.add_argument('--op', type=str, choices=['1', '2'], help="Opção a executar (1: PC1, 2: PC2)")
-    parser.add_argument('--broker', type=str, default="broker.hivemq.com:1883",
-                        help="Endereço do Broker MQTT (ex: host:porta)")
-    parser.add_argument('--mongo', type=str, default="mongodb://localhost:27017/?directConnection=true",
-                        help="URI do MongoDB")
-    args = parser.parse_args()
-
-    # 2. Descobrir dinamicamente onde este ficheiro está guardado
+    # Como o vigilante está DENTRO da pasta MySQL(PC2), a pasta_atual é essa!
     pasta_atual = os.path.dirname(os.path.abspath(__file__))
 
-    # 3. Definir os caminhos para os sub-scripts
-    path_to_mongo = os.path.join(pasta_atual, "Mongo(PC1)", "to_mongo.py")
-    path_mongo_mqtt = os.path.join(pasta_atual, "Mongo(PC1)", "MongoToMQTT.py")
-    path_mqtt_mysql = os.path.join(pasta_atual, "MySQL(PC2)", "MQTTToMySQL.py")
+    # O cloudToMySQL.py está na mesma exata pasta
+    script_cloud = os.path.join(pasta_atual, "cloudToMySQL.py")
 
-    # CAMINHO CORRIGIDO: Agora aponta para dentro da pasta MySQL(PC2)
-    path_vigilante = os.path.join(pasta_atual, "MySQL(PC2)", "vigilante_windows.py")
+    # Para chegar ao Mazerun, tem de subir 2 níveis ("..", "..")
+    path_mazerun = os.path.abspath(os.path.join(pasta_atual, "..", "..", "Mazerun", "mazerun.exe"))
 
-    # Se o utilizador não passou o "--op", mostra o menu interativo
-    escolha = args.op
-    if not escolha:
-        print("===========================================")
-        print("      LAUNCHER DE SCRIPTS - PISID 2026     ")
-        print(f" Broker padrão: {args.broker}")
-        print(f" Mongo padrão:  {args.mongo}")
-        print("===========================================")
-        print("1 - Iniciar Scripts PC1 (to_mongo + MongoToMQTT)")
-        print("2 - Iniciar Script PC2 (MQTTToMySQL + Vigilante)")
-        print("===========================================")
-        escolha = input("Escolha uma opção (1 ou 2): ")
+    ultimo_id_iniciado = None
 
-    # 4. Lógica de execução conforme a escolha
-    if escolha == '1':
-        print("\nA abrir os terminais do PC1 com as configurações passadas...")
-        args_pc1 = ['--broker', args.broker, '--mongo', args.mongo]
-        abrir_novo_terminal(path_to_mongo, args_pc1)
-        abrir_novo_terminal(path_mongo_mqtt, args_pc1)
-        print("Feito!")
+    print("=====================================================")
+    print(" 👀 VIGILANTE DO WINDOWS ATIVADO - À ESPERA DO SITE... ")
+    print(f" -> Broker Alvo: {broker_address} (Porta: {broker_port})")
+    print("=====================================================")
 
-    elif escolha == '2':
-        print("\nA abrir os terminais do PC2 (Migrador + Vigilante) com as configurações passadas...")
-        args_pc2 = ['--broker', args.broker]
-        abrir_novo_terminal(path_mqtt_mysql, args_pc2)
-        abrir_novo_terminal(path_vigilante, args_pc2)
-        print("Feito!")
+    while True:
+        try:
+            conn = mysql.connector.connect(**DB_CONFIG)
+            cursor = conn.cursor(dictionary=True)
 
-    else:
-        print("\nErro: Opção inválida.")
+            # Procura simulações no estado '1'
+            cursor.execute("SELECT IDSimulacao FROM simulacao WHERE Estado = '1' ORDER BY IDSimulacao DESC LIMIT 1")
+            resultado = cursor.fetchone()
+
+            if resultado:
+                id_atual = resultado['IDSimulacao']
+
+                if id_atual != ultimo_id_iniciado:
+                    print(f"\n[!] NOVA SIMULAÇÃO DETETADA NO SITE! (ID: {id_atual})")
+                    ultimo_id_iniciado = id_atual
+
+                    # PASSO 1: Correr a extração da Nuvem e passar o ID da simulação
+                    print("-> A executar a sincronização cloudToMySQL.py...")
+                    # O sys.executable garante que usa o mesmo Python/ambiente virtual
+                    subprocess.run([sys.executable, script_cloud, str(id_atual)])
+                    print("-> Sincronização concluída!")
+
+                    # PASSO 2: Abrir o Mazerun com as variáveis dinâmicas
+                    print("-> A abrir o jogo Mazerun no ecrã...")
+                    argumentos = [
+                        path_mazerun, "7",
+                        "--broker", broker_address,
+                        "--portbroker", str(broker_port),
+                        "--flagMessage", "1"
+                    ]
+                    subprocess.Popen(argumentos)
+
+            cursor.close()
+            conn.close()
+
+        except mysql.connector.Error as err:
+            print(f"Erro ao ligar à BD: {err}")
+        except Exception as e:
+            print(f"Ocorreu um erro: {e}")
+
+        # Aguarda 3 segundos antes de verificar novamente
+        time.sleep(3)
 
 
 if __name__ == "__main__":

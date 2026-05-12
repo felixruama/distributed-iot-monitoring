@@ -14,7 +14,8 @@ def abrir_novo_terminal(caminho_script, argumentos_extra=None):
     python_exe = sys.executable
 
     if os_name == "Windows":
-        comando = [python_exe, caminho_script] + argumentos_extra
+        # O truque está aqui: o "cmd /k" força a janela do Windows a ficar aberta mesmo se houver erro!
+        comando = ["cmd", "/k", python_exe, caminho_script] + argumentos_extra
         subprocess.Popen(comando, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     elif os_name == "Darwin":  # macOS
@@ -52,7 +53,9 @@ def main():
     path_to_mongo = os.path.join(pasta_atual, "Mongo(PC1)", "to_mongo.py")
     path_mongo_mqtt = os.path.join(pasta_atual, "Mongo(PC1)", "MongoToMQTT.py")
     path_mqtt_mysql = os.path.join(pasta_atual, "MySQL(PC2)", "MQTTToMySQL.py")
-    path_vigilante = os.path.join(pasta_atual, "vigilante_windows.py")
+
+    # CAMINHO CORRIGIDO: Agora aponta para dentro da pasta MySQL(PC2)
+    path_vigilante = os.path.join(pasta_atual, "MySQL(PC2)", "vigilante_windows.py")
 
     # Se o utilizador não passou o "--op", mostra o menu interativo
     escolha = args.op
@@ -70,7 +73,6 @@ def main():
     # 4. Lógica de execução conforme a escolha
     if escolha == '1':
         print("\nA abrir os terminais do PC1 com as configurações passadas...")
-        # O PC1 precisa das variáveis de Broker e Mongo
         args_pc1 = ['--broker', args.broker, '--mongo', args.mongo]
         abrir_novo_terminal(path_to_mongo, args_pc1)
         abrir_novo_terminal(path_mongo_mqtt, args_pc1)
@@ -78,7 +80,6 @@ def main():
 
     elif escolha == '2':
         print("\nA abrir os terminais do PC2 (Migrador + Vigilante) com as configurações passadas...")
-        # O PC2 só precisa da variável do Broker
         args_pc2 = ['--broker', args.broker]
         abrir_novo_terminal(path_mqtt_mysql, args_pc2)
         abrir_novo_terminal(path_vigilante, args_pc2)
