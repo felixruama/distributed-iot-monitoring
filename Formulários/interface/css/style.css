@@ -1,0 +1,274 @@
+/* ==========================================================================
+   1. BASE, CORES E LAYOUT GLOBAL
+   ========================================================================== */
+:root {
+    --tech-blue: #e9c307;
+    --tech-cyan: #ff4400;
+    --dark-bar: #222;
+    --light-bg: #f4f7f6;
+    --border-color: #ddd;
+}
+
+html, body { height: 100%; margin: 0; }
+
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background-color: var(--light-bg);
+    display: flex;
+    flex-direction: column;
+}
+
+.hero-banner {
+    background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)),
+                url('https://www.acmodasi.in/amdb/images/movie/s/5/marsupilami-2026-6b6B0i.jpg');
+    background-size: cover;
+    background-position: center;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   2. BOTÕES E NAVEGAÇÃO (ESTILO PILL)
+   ========================================================================== */
+nav.navbar {
+    background-color: var(--dark-bar);
+    padding: 12px;
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+}
+
+.nav-btn, .btn-submit, button {
+    padding: 8px 24px;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+}
+
+.nav-btn { background-color: var(--tech-blue); color: white; }
+.btn-submit { background-color: var(--tech-blue); color: white; }
+
+.nav-btn:hover, .btn-submit:hover {
+    background-color: var(--tech-cyan);
+    color: #000;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Botão Secundário (Cancelar/Voltar) */
+.btn-secondary {
+    background-color: #f0f0f0 !important;
+    color: #666 !important;
+    border: 1px solid #ddd !important;
+}
+
+.btn-secondary:hover {
+    background-color: #e0e0e0 !important;
+    color: #333 !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05) !important;
+}
+
+/* Botão Sair Circular */
+.nav-btn.logout {
+    background-color: #444;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+}
+.nav-btn.logout:hover { background-color: #cc0000; color: white; }
+
+/* ==========================================================================
+   3. ESTRUTURA DE CARTÕES (DASHBOARD E HISTÓRICO)
+   ========================================================================== */
+.container {
+    max-width: 1200px;
+    width: 100%;
+    margin: 30px auto;
+    padding: 0 20px;
+    box-sizing: border-box;
+}
+
+.card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.sim-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+}
+
+/* ==========================================================================
+   4. PÁGINA DE CONFIGURAÇÃO (LAYOUT DUAS COLUNAS)
+   ========================================================================== */
+.config-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 40px;
+    align-items: start;
+}
+
+.card-sidebar {
+    background-color: #bbbbbb !important;
+    border-radius: 25px;
+    padding: 30px !important;
+    color: #333;
+}
+
+.card-main-edit {
+    background-color: #f0f0f0 !important;
+    border-radius: 25px;
+    padding: 40px !important;
+}
+
+/* Grelha de formulário (usada em Configuração e Perfil) */
+.form-row-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+}
+
+.form-group-alt {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.form-group-alt label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #444;
+    font-size: 0.9rem;
+    margin-left: 10px;
+}
+
+.input-pill {
+    display: flex;
+    align-items: center;
+    background: white;
+    padding: 10px 18px;
+    border-radius: 50px;
+    border: 1px solid #ddd;
+    gap: 10px;
+}
+
+.input-pill input {
+    border: none;
+    background: transparent;
+    width: 100%;
+    outline: none;
+    font-weight: 600;
+}
+
+.input-pill span { color: #888; font-size: 0.8rem; }
+
+/* ==========================================================================
+   5. PÁGINA DE PERFIL (VERSÃO EXPANDIDA)
+   ========================================================================== */
+.profile-card {
+    max-width: 900px !important; /* Aumentado de 600px para 900px */
+    padding: 50px !important;    /* Mais respiro interno */
+    margin: 0 auto;
+    border-radius: 20px !important;
+}
+
+/* Forçar duas colunas em quase tudo para preencher espaço */
+.profile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+/* Ocupar a linha toda apenas no Nome (opcional) */
+.full-width {
+    grid-column: span 2;
+}
+
+.profile-actions {
+    margin-top: 50px;
+    display: flex;
+    justify-content: flex-end; /* Botões à direita como na configuração */
+    gap: 15px;
+}
+
+.btn-profile-save {
+    padding: 12px 50px !important;
+    font-size: 1rem !important;
+}
+
+/* ==========================================================================
+   6. TABELAS E FOOTER
+   ========================================================================== */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+    background-color: #f1f1f1;
+    text-align: left;
+    padding: 12px;
+    border-bottom: 2px solid var(--tech-blue);
+}
+.data-table td { padding: 12px; border-bottom: 1px solid #eee; }
+
+footer {
+    text-align: center;
+    padding: 25px 0;
+    color: #666;
+    border-top: 1px solid var(--border-color);
+    margin-top: auto;
+    background: white;
+}
+
+/* Garante que o corpo da página de login ocupa o ecrã todo verticalmente */
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Estilo específico para o card de login */
+.login-card {
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1) !important;
+    border-radius: 20px !important;
+}
+
+/* Melhora o espaçamento interno dos inputs de login */
+.login-card .input-pill {
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+}
+
+.login-card .input-pill:focus-within {
+    border-color: var(--tech-blue);
+    background-color: white;
+}
+
+.readonly-field {
+    background-color: #f9f9f9 !important;
+    border: 1px dashed #ccc !important;
+    opacity: 0.8;
+}
+
+.readonly-field input {
+    cursor: default;
+}
