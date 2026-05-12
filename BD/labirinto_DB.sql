@@ -333,44 +333,46 @@ END$$
 
 DROP PROCEDURE IF EXISTS `SP_RegistarPassagem`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_RegistarPassagem` (IN `p_id_simulacao` INT, IN `p_id_marsami` INT, IN `p_origem` INT, IN `p_destino` INT, IN `p_status` INT, IN `p_idmongo` VARCHAR(24))   BEGIN
-    -- Determinar se o Marsami é Ímpar (1) ou Par (0)
     DECLARE v_parity INT;
+
+    -- =========================================================================
+    -- O "AIRBAG": Cancela tudo se houver falha a meio do processo!
+    -- =========================================================================
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    -- Iniciar o modo "Tudo ou Nada"
+    START TRANSACTION;
+
+    -- Determinar se o Marsami é Ímpar (1) ou Par (0)
     SET v_parity = p_id_marsami % 2;
 
-    -- 1. Registar a passagem na tabela medicoespassagens
-INSERT INTO medicoespassagens (DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDSimulacao, IDMongo)
-VALUES (NOW(), p_origem, p_destino, p_id_marsami, p_status, p_id_simulacao, p_idmongo);
+    -- 1. Registar a passagem
+    INSERT INTO medicoespassagens (DataMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDSimulacao, IDMongo)
+    VALUES (NOW(), p_origem, p_destino, p_id_marsami, p_status, p_id_simulacao, p_idmongo);
 
--- 2. Retirar um Marsami da sala de ORIGEM na tabela ocupacaolabirinto
--- Usamos GREATEST para garantir que o número nunca fica negativo (abaixo de 0)
-IF v_parity = 1 THEN
-UPDATE ocupacaolabirinto
-SET NumeroMarsamisOdd = GREATEST(NumeroMarsamisOdd - 1, 0)
-WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
-ELSE
-UPDATE ocupacaolabirinto
-SET NumeroMarsamisEven = GREATEST(NumeroMarsamisEven - 1, 0)
-WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
-END IF;
-
-    -- 3. Adicionar um Marsami à sala de DESTINO na tabela ocupacaolabirinto
-    -- Usamos ON DUPLICATE KEY UPDATE para criar a linha caso a sala ainda não exista na tabela
+    -- 2. Retirar o Marsami da sala de ORIGEM
     IF v_parity = 1 THEN
-        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao)
-        VALUES (1, 0, p_destino, p_id_simulacao)
-        ON DUPLICATE KEY UPDATE NumeroMarsamisOdd = NumeroMarsamisOdd + 1;
-ELSE
-        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao)
-        VALUES (0, 1, p_destino, p_id_simulacao)
-        ON DUPLICATE KEY UPDATE NumeroMarsamisEven = NumeroMarsamisEven + 1;
-END IF;
+        UPDATE ocupacaolabirinto SET NumeroMarsamisOdd = GREATEST(NumeroMarsamisOdd - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
+    ELSE
+        UPDATE ocupacaolabirinto SET NumeroMarsamisEven = GREATEST(NumeroMarsamisEven - 1, 0) WHERE Sala = p_origem AND IDSimulacao = p_id_simulacao;
+    END IF;
+
+    -- 3. Adicionar o Marsami à sala de DESTINO
+    IF v_parity = 1 THEN
+        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (1, 0, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisOdd = NumeroMarsamisOdd + 1;
+    ELSE
+        INSERT INTO ocupacaolabirinto (NumeroMarsamisOdd, NumeroMarsamisEven, Sala, IDSimulacao) VALUES (0, 1, p_destino, p_id_simulacao) ON DUPLICATE KEY UPDATE NumeroMarsamisEven = NumeroMarsamisEven + 1;
+    END IF;
 
     -- 4. Atualizar a localização e o estado Cansado do Marsami
-    -- Se o status for 2, Cansado = 1 (true). Caso contrário, Cansado = 0 (false).
-UPDATE marsami
-SET IDSala = p_destino,
-    Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END
-WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
+    UPDATE marsami SET IDSala = p_destino, Cansado = CASE WHEN p_status = 2 THEN 1 ELSE 0 END WHERE IDMarsami = p_id_marsami AND IDSimulacao = p_id_simulacao;
+
+    -- Se chegou aqui sem crashar, grava definitivamente as 4 alterações ao mesmo tempo!
+    COMMIT;
 
 END$$
 
