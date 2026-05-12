@@ -231,7 +231,7 @@ def processar_movimentos_main():
                             raise ValueError("Corredor inválido")
                     batch_data.append({**doc, "_id": str(doc["_id"])})
                 except Exception as err:
-                    db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True, "Migrado": True}})
+                    db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True}})
 
             if not batch_data: continue
 
