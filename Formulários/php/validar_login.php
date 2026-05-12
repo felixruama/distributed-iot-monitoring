@@ -1,51 +1,45 @@
 <?php
 session_start();
 require_once('SPHandler.php');
+include "../App/Php/db_config.php";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = $_POST['email'];
     $password = $_POST['password'];
 
     try {
-        // 1. Validação de Credenciais (Nível MySQL)
-        // Tenta ligar ao MySQL. Se falhar, a password está errada.
+        // 1. Validação de Credenciais no MySQL (Nível Motor)
+        // MUDANÇA: Nome da BD corrigido para labirinto_DB_ruama
         $teste_ligacao = new PDO("mysql:host=mysql;dbname=labirinto_DB;charset=utf8mb4", $email, $password);
         $teste_ligacao->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $teste_ligacao = null; 
+        $teste_ligacao = null;
 
-        // 2. Obter dados do perfil
-        $resultado = $spManager->getData('SP_ValidarLogin', [$email]);
+        // 2. Obter dados do perfil do utilizador
+        $resultado = $spManager->getData('SP_ValidarACESSO', [$email]);
         $user = $resultado[0] ?? null;
 
         if ($user) {
-            // ============================================================
-            // 3. REGRA DE OURO: FILTRO DE TIPO DE UTILIZADOR
-            // ============================================================
+            // MUDANÇA: Redirecionamento corrigido para a pasta WebSite
             if ($user['Tipo'] !== 'Utilizador') {
-                // Se não for "Utilizador", barramos a entrada na Web
-                header("Location: ../interface/index.php?erro=" . urlencode("Acesso negado: Esta plataforma é exclusiva para utilizadores comuns."));
+                header("Location: ../WebSite/index.php?erro=" . urlencode("Acesso negado: Use a App ou Portal Admin."));
                 exit();
             }
 
-            // Se chegou aqui, é porque é 'Utilizador'. Criamos a sessão.
             $_SESSION['IDUtilizador'] = $user['IDUtilizador'];
             $_SESSION['user_nome']    = $user['Nome'];
             $_SESSION['user_email']   = $user['Email'];
-            $_SESSION['user_tipo']    = $user['Tipo']; 
-            $_SESSION['user_equipa']  = $user['Equipa'];
+            $_SESSION['user_tipo']    = $user['Tipo'];
 
-            header("Location: ../interface/dashboard.php");
+            header("Location: ../WebSite/dashboard.php");
             exit();
         } else {
-            header("Location: ../interface/index.php?erro=" . urlencode("Utilizador não encontrado no sistema."));
+            header("Location: ../WebSite/index.php?erro=" . urlencode("Utilizador não encontrado."));
             exit();
         }
 
     } catch (PDOException $e) {
-        header("Location: ../interface/index.php?erro=" . urlencode("Email ou Password incorretos."));
-        exit();
-    } catch (Exception $e) {
-        header("Location: ../interface/index.php?erro=" . urlencode("Erro no servidor."));
+        header("Location: ../WebSite/index.php?erro=" . urlencode("Email ou Password incorretos."));
         exit();
     }
 }
+?>
