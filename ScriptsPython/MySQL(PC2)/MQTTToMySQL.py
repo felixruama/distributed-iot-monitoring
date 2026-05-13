@@ -32,6 +32,7 @@ last_inserted_id = None
 db_conn = None
 db_cursor = None
 id_simulacao_atual = None
+motivo=None
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
@@ -219,7 +220,7 @@ def on_message(client, userdata, msg):
             hora_sensor = payload.get('Hour')
             sensor_type = 'T' if 'Temperature' in payload else 'S'
             is_alerta = False
-            is_terminar = False
+            is_terminar= False
             tipo_alerta = ""
             texto_mensagem = ""
 
@@ -233,8 +234,12 @@ def on_message(client, userdata, msg):
                     is_alerta = True
                     tipo_alerta = "Temperatura Mínima"
                     texto_mensagem = f"Atenção! A temperatura desceu para {val}ºC."
-                if limites_termino['temp_max'] is not None and (val > limites_termino['temp_max'] or val < limites_termino['temp_min']):
-                    is_terminar = True
+                if limites_termino['temp_max'] is not None and val > limites_termino['temp_max']:
+                    motivo="Temperatura max atingida"
+                    is_terminar=True
+                elif limites_termino['temp_min'] is not None and val < limites_termino['temp_min']:
+                    motivo="Temperatura min atingida"
+                    is_terminar=True
                 
             else:
                 db_cursor.execute("INSERT INTO som (Hora, Som) VALUES (%s, %s)", (hora_sensor, val))
@@ -243,15 +248,15 @@ def on_message(client, userdata, msg):
                     tipo_alerta = "Ruído Máximo"
                     texto_mensagem = f"Atenção! O nível de ruído atingiu {val}dB."
                 if limites_termino['som_max'] is not None and val > limites_termino['som_max']:
-                    is_terminar = True
+                    motivo="Som max atingido"
+                    is_terminar=True
                     
             if is_alerta:
                 db_cursor.callproc('SP_RegistarAlerta', [id_simulacao_atual, sensor_type, val, tipo_alerta, texto_mensagem, hora_sensor])
 
             if is_terminar:
-                db_cursor.callproc('SP_TerminarSimulacao', [id_simulacao_atual])
+                db_cursor.execute("UPDATE simulacao SET motivo_fim = %s WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
                 print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
-                id_simulacao_atual = None
 
             db_conn.commit()
             
