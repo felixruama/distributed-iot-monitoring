@@ -84,7 +84,7 @@ include('includes/header.php');
             
             <div class="param-row" style="display: flex; justify-content: space-between; padding: 10px; background: #f9f9f9; border-radius: 8px;">
                 <span><strong>Intervalo entre Alertas:</strong></span>
-                <span><?php echo $dados['SegundosIntervaloAlertas'] ?? 'N/A'; ?> segundos</span>
+                <span><?php echo $dados['IntervaloAlertas'] ?? 'N/A'; ?> segundos</span>
             </div>
         </div>
 
