@@ -1,0 +1,32 @@
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS `SP_EstatisticasFinaisSimulacao`$$
+
+CREATE PROCEDURE `SP_EstatisticasFinaisSimulacao`(IN `p_id_simulacao` INT)
+BEGIN
+    -- 1. O Marsami que mais se movimentou no total (Total de movimentos/passagens)
+    SELECT IDMarsami, COUNT(*) AS TotalPassagens
+    FROM historico_medicoespassagens
+    WHERE IDSimulacao = p_id_simulacao
+    GROUP BY IDMarsami
+    ORDER BY TotalPassagens DESC
+    LIMIT 1;
+
+    -- 2. Explorador: O Marsami que visitou o maior número de salas DIFERENTES
+    SELECT IDMarsami, COUNT(DISTINCT SalaDestino) AS SalasDiferentes
+    FROM historico_medicoespassagens
+    WHERE IDSimulacao = p_id_simulacao
+    GROUP BY IDMarsami
+    ORDER BY SalasDiferentes DESC
+    LIMIT 1;
+
+    -- 3. Hotspot: A sala que recebeu mais entradas (A mais visitada)
+    SELECT SalaDestino AS Sala, COUNT(*) AS TotalEntradas
+    FROM historico_medicoespassagens
+    WHERE IDSimulacao = p_id_simulacao
+    GROUP BY SalaDestino
+    ORDER BY TotalEntradas DESC
+    LIMIT 1;
+END$$
+
+DELIMITER ;
