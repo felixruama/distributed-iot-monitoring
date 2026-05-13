@@ -36,12 +36,11 @@ ultimas_mensagens = {}
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Ligado ao broker HiveMQ com sucesso! (Código: {reason_code})") # O reason_code 0 indica sucesso
 
-    # Como o Script 0 está sempre online, usamos QoS 1 para garantir a receção
-    # de absolutamente todos os dados gerados pelo simulador.
+    # QoS 2 para n haver duplicados
     client.subscribe([
-        (TOPIC_SOM, 1),
-        (TOPIC_TEMP, 1),
-        (TOPIC_MOV, 1)
+        (TOPIC_SOM, 2),
+        (TOPIC_TEMP, 2),
+        (TOPIC_MOV, 2)
     ])
     print("A escutar mensagens (QoS 1) de todos os sensores...")
 
