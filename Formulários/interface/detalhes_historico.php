@@ -71,6 +71,7 @@ include('includes/header.php');
         <p><strong>Descrição:</strong> <?php echo $dados['Descricao'] ?? 'N/A'; ?></p>
         <p><strong>Responsável:</strong> <?php echo $dados['NomeCriador'] ?? 'N/A'; ?></p>
         <p><strong>Duração:</strong> <?php echo $dados['DataHoraInicio'] ?? 'N/A'; ?> até <?php echo $dados['DataHoraFim'] ?? 'N/A'; ?></p>
+        <p><strong>Motivo de Fim:</strong> <?php echo htmlspecialchars($dados['motivo_fim'] ?? 'Desconhecido'); ?></p>
     </section>
 </div>
 <?php include('includes/footer.php'); ?>
