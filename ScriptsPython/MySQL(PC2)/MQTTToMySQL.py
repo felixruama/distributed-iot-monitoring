@@ -155,7 +155,7 @@ def on_connect(client, userdata, flags, rc):
             print(f"[AVISO BOOT] Não foi possível verificar o último ID no MySQL no arranque: {e}")
 
 def on_message(client, userdata, msg):
-    global last_inserted_id, id_simulacao_atual
+    global last_inserted_id, id_simulacao_atual, motivo
 
     if not manter_conexao_viva(): return
     if id_simulacao_atual is None:
@@ -255,7 +255,7 @@ def on_message(client, userdata, msg):
                 db_cursor.callproc('SP_RegistarAlerta', [id_simulacao_atual, sensor_type, val, tipo_alerta, texto_mensagem, hora_sensor])
 
             if is_terminar:
-                db_cursor.execute("UPDATE simulacao SET motivo_fim = %s WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
+                db_cursor.execute("UPDATE simulacao SET motivo_fim = IFNULL(motivo_fim, %s) WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
                 print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
 
             db_conn.commit()

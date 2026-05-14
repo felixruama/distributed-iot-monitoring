@@ -226,19 +226,28 @@ def processar_movimentos_main():
                     marsami_id = int(doc["Marsami"])
                     origem, destino = int(doc["RoomOrigin"]), int(doc["RoomDestiny"])
                     if not (1 <= marsami_id <= max_marsamis_global): raise ValueError("Marsami inválido")
+
                     if origem != 0:
+                        # 1. MOVIMENTO NORMAL: Verifica se o corredor existe
                         if not any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global):
                             raise ValueError("Corredor inválido")
-                    else:
-                        # ORIGEM É 0: Vamos ver no Mongo se JÁ EXISTIA um registo válido antes deste!
+
+                    elif destino != 0:
+                        # 2. LARGADA INICIAL (Origem 0 -> Destino X): Verifica duplicados
                         duplicado = db.Movimento.find_one({
                             "Marsami": marsami_id,
                             "RoomOrigin": 0,
+                            "RoomDestiny": {"$ne": 0}, # Garante que procura apenas outras largadas
                             "Anomalia": False,
-                            "_id": {"$lt": doc["_id"]} # A magia está aqui: procura apenas documentos mais antigos que este
+                            "_id": {"$lt": doc["_id"]}
                         })
                         if duplicado:
-                            raise ValueError(f"Marsami {marsami_id} já tinha saído da sala 0 anteriormente (Duplicado).")
+                            raise ValueError(f"Marsami {marsami_id} já tinha sido largado anteriormente (Duplicado).")
+
+                    else:
+                        # 3. EVENTO DE CANSAÇO/IMOBILIZAÇÃO (Origem 0 -> Destino 0)
+                        # Este evento é sempre legítimo de passar para o MySQL lidar.
+                        pass
                     batch_data.append({**doc, "_id": str(doc["_id"])})
                 except Exception as err:
                     db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True}})
