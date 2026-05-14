@@ -1,0 +1,54 @@
+-- 1. Criar o utilizador para a App Android (Tipo: 'Monitor Android')
+CALL SP_CriarUtilizador(
+    'App Android',
+    'android@lab.pt',
+    'android123',
+    'Monitor Android',
+    '910000001',
+    '2000-01-01',
+    7
+);
+
+-- 2. Criar o utilizador comum para o Website (Tipo: 'Utilizador')
+CALL SP_CriarUtilizador(
+    'Membro da Equipa 1',
+    'equipa@lab.pt',
+    'equipa123',
+    'Utilizador',
+    '910000002',
+    '2000-01-01',
+    7
+);
+
+-- 3. Criar o utilizador para o Script MongoToMQTT (Tipo: 'Migrador')
+CALL SP_CriarUtilizador(
+    'Script Migrador',
+    'migrador@lab.pt',
+    'migrador123',
+    'Migrador',
+    '910000003',
+    '2000-01-01',
+    7
+);
+
+-- 4. Criar o segundo utilizador de equipa para testar privilegios
+CALL SP_CriarUtilizador(
+    'Membro da Equipa 2',
+    'outrouser@lab.pt',
+    'equipa123',
+    'Utilizador',
+    '910000002',
+    '2000-01-01',
+    7
+);
+
+-- 4. Criar o utilizador de OUTRA equipa para testar privilegios
+CALL SP_CriarUtilizador(
+    'Membro Fora da Equipa',
+    'outrouser@lab.pt',
+    'equipa123',
+    'Utilizador',
+    '910000002',
+    '2000-01-01',
+    8
+);
