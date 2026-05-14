@@ -33,6 +33,7 @@ db_conn = None
 db_cursor = None
 id_simulacao_atual = None
 motivo=None
+jadeuprint=False
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
@@ -119,7 +120,7 @@ def manter_conexao_viva():
     return True
 
 def procurar_simulacao_ativa():
-    global id_simulacao_atual, limites_alerta
+    global id_simulacao_atual, limites_alerta, jadeuprint
     if not manter_conexao_viva(): return
     try:
         db_conn.commit()
@@ -128,6 +129,7 @@ def procurar_simulacao_ativa():
 
         if resultado:
             id_simulacao_atual = resultado[0]
+            jadeuprint=False
             limites_alerta['temp_max'] = float(resultado[1]) if resultado[1] else None
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
@@ -155,7 +157,7 @@ def on_connect(client, userdata, flags, rc):
             print(f"[AVISO BOOT] Não foi possível verificar o último ID no MySQL no arranque: {e}")
 
 def on_message(client, userdata, msg):
-    global last_inserted_id, id_simulacao_atual, motivo
+    global last_inserted_id, id_simulacao_atual, motivo, jadeuprint
 
     if not manter_conexao_viva(): return
     if id_simulacao_atual is None:
@@ -256,7 +258,11 @@ def on_message(client, userdata, msg):
 
             if is_terminar:
                 db_cursor.execute("UPDATE simulacao SET motivo_fim = IFNULL(motivo_fim, %s) WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
-                print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
+                if not jadeuprint:
+
+                    print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
+                    jadeuprint=True
+
 
             db_conn.commit()
             
