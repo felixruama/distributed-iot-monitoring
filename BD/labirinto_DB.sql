@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 12, 2026 at 06:57 PM
+-- Generation Time: May 14, 2026 at 02:23 AM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -52,11 +52,11 @@ END IF;
     -- Inserimos TUDO de uma vez na tabela simulacao (SEM O CAMPO SimulacaoIniciada)
 INSERT INTO simulacao (
     Descricao, Equipa, Criador, Pontos, Estado,
-    TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, Periodicidade, SegundosIntervaloAlertas
+    TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, Periodicidade, SegundosIntervaloAlertas, motivo_fim
 )
 VALUES (
            p_Descricao, v_equipa, p_IDUtilizador, 0, '0',
-           p_TempMax, p_TempMin, p_RuidoMax, p_Periodicidade, p_Intervalo
+           p_TempMax, p_TempMin, p_RuidoMax, p_Periodicidade, p_Intervalo, NULL
        );
 
 SELECT LAST_INSERT_ID() AS IDSimulacao;
@@ -158,28 +158,78 @@ END$$
 
 DROP PROCEDURE IF EXISTS `SP_EditarPerfil`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_EditarPerfil` (IN `p_IDUtilizador` INT, IN `p_JSON` JSON)   BEGIN
-    -- Declaramos tudo como VARCHAR para que o MySQL não crashe ao ler o JSON!
+    -- 1. Declarar Variáveis
     DECLARE v_Nome VARCHAR(100);
     DECLARE v_Telemovel VARCHAR(12);
-    DECLARE v_DataNascimento VARCHAR(20); -- <--- ALTERADO PARA VARCHAR
+    DECLARE v_DataNascimento VARCHAR(20);
+    DECLARE v_EmailNovo VARCHAR(50);
+    DECLARE v_EmailAntigo VARCHAR(50);
     DECLARE v_ID_Alvo INT;
 
+    -- 2. Extrair dados do JSON
     SET v_ID_Alvo = JSON_UNQUOTE(JSON_EXTRACT(p_JSON, '$.IDUtilizador'));
     SET v_Nome = JSON_UNQUOTE(JSON_EXTRACT(p_JSON, '$.Nome'));
     SET v_Telemovel = JSON_UNQUOTE(JSON_EXTRACT(p_JSON, '$.Telemovel'));
     SET v_DataNascimento = JSON_UNQUOTE(JSON_EXTRACT(p_JSON, '$.DataNascimento'));
+    SET v_EmailNovo = JSON_UNQUOTE(JSON_EXTRACT(p_JSON, '$.Email')); -- AGORA JÁ LÊ O EMAIL!
 
+    -- 3. Validação de Segurança Básica
     IF (p_IDUtilizador != v_ID_Alvo) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro de Seguranca: Nao tens permissao para editar o perfil desta conta!';
 ELSE
-        -- Agora sim, na hora de gravar é que limpamos a sujidade
+        -- 4. Lógica de Alteração de E-mail (Identidade no MySQL)
+SELECT Email INTO v_EmailAntigo FROM utilizador WHERE IDUtilizador = p_IDUtilizador;
+
+IF (v_EmailNovo != v_EmailAntigo) THEN
+            -- Verifica se o e-mail novo já existe noutra conta
+            IF EXISTS (SELECT 1 FROM utilizador WHERE Email = v_EmailNovo AND IDUtilizador != p_IDUtilizador) THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Este e-mail ja esta a ser utilizado por outro utilizador.';
+END IF;
+
+            -- Renomear o utilizador no motor do MySQL
+            SET @sql_rename = CONCAT('RENAME USER ''', v_EmailAntigo, '''@''%'' TO ''', v_EmailNovo, '''@''%'';');
+PREPARE stmt_rename FROM @sql_rename;
+EXECUTE stmt_rename;
+DEALLOCATE PREPARE stmt_rename;
+END IF;
+
+        -- 5. Atualizar a Tabela
 UPDATE utilizador
 SET Nome = v_Nome,
+    Email = v_EmailNovo, -- AGORA JÁ GUARDA O EMAIL!
     Telemovel = NULLIF(v_Telemovel, ''),
-    -- Se vier vazio, manda NULL para a BD. Senão, manda a data.
     DataNascimento = IF(v_DataNascimento = '' OR v_DataNascimento = 'null', NULL, v_DataNascimento)
 WHERE IDUtilizador = p_IDUtilizador;
+
+SELECT 'Sucesso: Perfil e Login atualizados!' AS Mensagem;
 END IF;
+END$$
+
+DROP PROCEDURE IF EXISTS `SP_EstatisticasFinaisSimulacao`$$
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_EstatisticasFinaisSimulacao` (IN `p_id_simulacao` INT)   BEGIN
+    -- 1. MVP: O Marsami que mais se movimentou no total (Total de movimentos/passagens)
+SELECT IDMarsami, COUNT(*) AS TotalPassagens
+FROM historico_medicoespassagens
+WHERE IDSimulacao = p_id_simulacao
+GROUP BY IDMarsami
+ORDER BY TotalPassagens DESC
+    LIMIT 1;
+
+-- 2. Explorador: O Marsami que visitou o maior número de salas DIFERENTES
+SELECT IDMarsami, COUNT(DISTINCT SalaDestino) AS SalasDiferentes
+FROM historico_medicoespassagens
+WHERE IDSimulacao = p_id_simulacao
+GROUP BY IDMarsami
+ORDER BY SalasDiferentes DESC
+    LIMIT 1;
+
+-- 3. Hotspot: A sala que recebeu mais entradas (A mais visitada)
+SELECT SalaDestino AS Sala, COUNT(*) AS TotalEntradas
+FROM historico_medicoespassagens
+WHERE IDSimulacao = p_id_simulacao
+GROUP BY SalaDestino
+ORDER BY TotalEntradas DESC
+    LIMIT 1;
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_IniciarSimulacao`$$
@@ -207,8 +257,8 @@ SELECT COUNT(*) INTO v_simulacoes_terminadas FROM simulacao WHERE Estado = '2';
 
 IF v_simulacoes_terminadas > 0 THEN
 
-        INSERT INTO historico_simulacao (IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado)
-SELECT IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado
+        INSERT INTO historico_simulacao (IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado, motivo_fim)
+SELECT IDSimulacao, Descricao, Equipa, DataHoraInicio, DataHoraFim, Pontos, Criador, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, SegundosIntervaloAlertas, Periodicidade, Estado, motivo_fim
 FROM simulacao WHERE Estado = '2';
 
 INSERT INTO historico_medicoespassagens (IDMedicao, SalaOrigem, SalaDestino, IDMarsami, Status, IDMongo, IDSimulacao)
@@ -230,7 +280,7 @@ END IF;
 
     -- INICIAR A NOVA SIMULAÇÃO
 UPDATE simulacao
-SET Estado = '1', DataHoraInicio = CURRENT_TIMESTAMP
+SET Estado = '1', DataHoraInicio = CURRENT_TIMESTAMP, motivo_fim = NULL
 WHERE IDSimulacao = p_IDSimulacao;
 
 IF ROW_COUNT() = 0 THEN
@@ -258,7 +308,8 @@ SELECT
     MAX(res.Criador) AS Criador,
     u.Nome AS NomeCriador,
     MAX(res.DataHoraInicio) AS DataHoraInicio,
-    MAX(res.DataHoraFim) AS DataHoraFim
+    MAX(res.DataHoraFim) AS DataHoraFim,
+    MAX(res.motivo_fim) AS motivo_fim
 FROM (
          -- Parte 1: Uniformiza os textos da tabela simulacao para utf8mb4
          SELECT
@@ -266,8 +317,9 @@ FROM (
              CONVERT(Descricao USING utf8mb4) AS Descricao,
              CONVERT(Estado USING utf8mb4) AS Estado,
              Criador,
-             NULL AS DataHoraInicio,
-             NULL AS DataHoraFim
+             DataHoraInicio,
+             DataHoraFim,
+             CONVERT(motivo_fim USING utf8mb4) AS motivo_fim
          FROM simulacao
          WHERE Estado = '2'
 
@@ -280,7 +332,8 @@ FROM (
              CONVERT(Estado USING utf8mb4) AS Estado,
              Criador,
              DataHoraInicio,
-             DataHoraFim
+             DataHoraFim,
+             CONVERT(motivo_fim USING utf8mb4) AS motivo_fim
          FROM historico_simulacao
      ) AS res
          LEFT JOIN utilizador u ON res.Criador = u.IDUtilizador
@@ -297,7 +350,7 @@ END$$
 
 DROP PROCEDURE IF EXISTS `SP_ObterSimulacoesAtivas`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_ObterSimulacoesAtivas` ()   BEGIN
-SELECT s.IDSimulacao, s.Descricao, s.Estado, s.Criador, u.Nome AS NomeCriador
+SELECT s.IDSimulacao, s.Descricao, s.Estado, s.Criador, u.Nome AS NomeCriador, s.Equipa
 FROM simulacao s
          LEFT JOIN utilizador u ON s.Criador = u.IDUtilizador
 WHERE s.Estado IN ('0', '1')
@@ -402,7 +455,7 @@ END$$
 
 DROP PROCEDURE IF EXISTS `SP_TerminarSimulacao`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_TerminarSimulacao` (IN `p_id_simulacao` INT)   BEGIN
-UPDATE simulacao SET Estado = '2', DataHoraFim = CURRENT_TIMESTAMP WHERE IDSimulacao = p_id_simulacao;
+UPDATE simulacao SET Estado = '2', DataHoraFim = CURRENT_TIMESTAMP, motivo_fim = IFNULL(motivo_fim, 'Todos os marsamis ficaram cansados') WHERE IDSimulacao = p_id_simulacao;
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_ValidarLogin`$$
@@ -485,7 +538,8 @@ SELECT
     MAX(res.DataHoraFim) AS DataHoraFim,
     MAX(res.TempMin) AS TempMin,
     MAX(res.TempMax) AS TempMax,
-    MAX(res.RuidoMax) AS RuidoMax
+    MAX(res.RuidoMax) AS RuidoMax,
+    MAX(res.motivo_fim) AS motivo_fim
 FROM (
          -- Parte 1: Buscar na tabela simulacao
          SELECT
@@ -493,11 +547,12 @@ FROM (
              CONVERT(Descricao USING utf8mb4) AS Descricao,
              CONVERT(Estado USING utf8mb4) AS Estado,
              Criador,
-             NULL AS DataHoraInicio,
-             NULL AS DataHoraFim,
+             DataHoraInicio,
+             DataHoraFim,
              TempMinAlerta AS TempMin,
              TempMaxAlerta AS TempMax,
-             RuidoMaxAlerta AS RuidoMax
+             RuidoMaxAlerta AS RuidoMax,
+             CONVERT(motivo_fim USING utf8mb4) AS motivo_fim
          FROM simulacao
          WHERE IDSimulacao = p_IDSimulacao AND Estado = '2'
 
@@ -514,7 +569,8 @@ FROM (
              DataHoraFim,
              TempMinAlerta AS TempMin,
              TempMaxAlerta AS TempMax,
-             RuidoMaxAlerta AS RuidoMax
+             RuidoMaxAlerta AS RuidoMax,
+             CONVERT(motivo_fim USING utf8mb4) AS motivo_fim
          FROM historico_simulacao
          WHERE IDSimulacao = p_IDSimulacao
      ) AS res
@@ -610,7 +666,8 @@ CREATE TABLE `historico_simulacao` (
                                        `SegundosIntervaloAlertas` int DEFAULT '60',
                                        `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
                                        `Periodicidade` int DEFAULT NULL,
-                                       `Estado` enum('0','1','2') NOT NULL DEFAULT '0'
+                                       `Estado` enum('0','1','2') NOT NULL DEFAULT '0',
+                                       `motivo_fim` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- --------------------------------------------------------
@@ -722,7 +779,8 @@ CREATE TABLE `simulacao` (
                              `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
                              `SegundosIntervaloAlertas` int DEFAULT '60',
                              `Periodicidade` int DEFAULT NULL,
-                             `Estado` enum('0','1','2') NOT NULL DEFAULT '0'
+                             `Estado` enum('0','1','2') NOT NULL DEFAULT '0',
+                             `motivo_fim` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- --------------------------------------------------------
@@ -796,7 +854,9 @@ INSERT INTO `utilizador` (`IDUtilizador`, `Nome`, `Telemovel`, `Tipo`, `Email`, 
                                                                                                                 (28, 'João pinba', '999999999', 'Utilizador', 'joao@lab.pt', '1995-05-19', 1),
                                                                                                                 (32, 'App Android', '910000001', 'Monitor Android', 'android@lab.pt', '2000-01-01', 7),
                                                                                                                 (33, 'Membro da Equipa', '910000002', 'Utilizador', 'equipa@lab.pt', '2000-01-01', 7),
-                                                                                                                (34, 'Script Migrador', '910000003', 'Migrador', 'migrador@lab.pt', '2000-01-01', 7);
+                                                                                                                (34, 'Script Migrador', '910000003', 'Migrador', 'migrador@lab.pt', '2000-01-01', 7),
+                                                                                                                (35, 'Outra Equipa', '910000002', 'Utilizador', 'outraequipa@lab.pt', '2000-01-01', 8),
+                                                                                                                (36, 'Outro user da Equipa', '910000002', 'Utilizador', 'outrouser@lab.pt', '2000-01-01', 7);
 
 --
 -- Indexes for dumped tables
@@ -895,43 +955,43 @@ ALTER TABLE `utilizador`
 -- AUTO_INCREMENT for table `corredor`
 --
 ALTER TABLE `corredor`
-    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `medicoespassagens`
 --
 ALTER TABLE `medicoespassagens`
-    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `mensagens`
 --
 ALTER TABLE `mensagens`
-    MODIFY `ID` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `ID` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `simulacao`
 --
 ALTER TABLE `simulacao`
-    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDSimulacao` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `som`
 --
 ALTER TABLE `som`
-    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `temperatura`
 --
 ALTER TABLE `temperatura`
-    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `utilizador`
 --
 ALTER TABLE `utilizador`
-    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=37;
 
 --
 -- Constraints for dumped tables
