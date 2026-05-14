@@ -16,6 +16,7 @@ $simulacoes = $spManager->getData('SP_ObterSimulacoesAtivas', []);
 
 // O ID do utilizador logado para sabermos se ele é o "Dono" da simulação
 $id_logado = $_SESSION['IDUtilizador'] ?? 0;
+$equipa_logado = $_SESSION['user_equipa'] ?? -1;
 
 include('includes/header.php'); 
 ?>
@@ -41,6 +42,8 @@ include('includes/header.php');
             <?php
                 // Variáveis de controlo
                 $is_criador = ($sim['Criador'] == $id_logado);
+                $is_mesma_equipa = (isset($sim['Equipa']) && $sim['Equipa'] == $equipa_logado);
+
                 $estado_texto = ($sim['Estado'] == '0') ? 'Criada' : 'Iniciada';
                 $estado_cor = ($sim['Estado'] == '0') ? 'orange' : 'blue';
                 $nome_criador = htmlspecialchars($sim['NomeCriador'] ?? 'Desconhecido');
@@ -48,25 +51,30 @@ include('includes/header.php');
             <div class="card sim-card">
                 <div class="info">
                     <div style="font-size: 1.1rem; font-weight: bold;">
-                        Simulação #<?php echo $sim['IDSimulacao']; ?> 
+                        Simulação #<?php echo $sim['IDSimulacao']; ?>
                         <span style="font-size: 0.9rem; font-weight: normal; color: #555;">(<?php echo htmlspecialchars($sim['Descricao'] ?? ''); ?>)</span>
                     </div>
                     <div style="color: #666; font-size: 0.9rem;">
-                        Criador: <?php echo $nome_criador; ?> | 
+                        Criador: <?php echo $nome_criador; ?> |
                         Estado: <span style="color: <?php echo $estado_cor; ?>; font-weight: bold;"><?php echo $estado_texto; ?></span>
                     </div>
                 </div>
-                
+
                 <div class="actions" style="display: flex; align-items: center; gap: 20px;">
                     <?php if ($sim['Estado'] == '0'): ?>
-                        <?php if ($is_criador): ?>
+
+                        <?php if ($is_criador || $is_mesma_equipa): ?>
                             <a href="../php/iniciar_simulacao.php?id=<?php echo $sim['IDSimulacao']; ?>" class="btn-submit" style="background-color: #28a745; text-decoration: none;">Iniciar Simulação</a>
+                        <?php endif; ?>
+
+                        <?php if ($is_criador): ?>
                             <a href="configurar_simulacao.php?id=<?php echo $sim['IDSimulacao']; ?>" class="edit-icon" title="Editar Parâmetros">
                                 <i class="fas fa-pencil-alt" style="color: #444; font-size: 1.2rem;"></i>
                             </a>
                         <?php else: ?>
                             <a href="detalhes_simulacao.php?id=<?php echo $sim['IDSimulacao']; ?>" class="btn-submit">Ver detalhes</a>
                         <?php endif; ?>
+
                     <?php else: ?>
                         <a href="detalhes_simulacao.php?id=<?php echo $sim['IDSimulacao']; ?>" class="btn-submit" style="background-color: var(--tech-blue);">Ver detalhes</a>
                     <?php endif; ?>
