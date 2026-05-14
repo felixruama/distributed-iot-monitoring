@@ -45,7 +45,7 @@ CALL SP_CriarUtilizador(
 -- 4. Criar o utilizador de OUTRA equipa para testar privilegios
 CALL SP_CriarUtilizador(
     'Membro Fora da Equipa',
-    'outrouser@lab.pt',
+    'outraequipa@lab.pt',
     'equipa123',
     'Utilizador',
     '910000002',
