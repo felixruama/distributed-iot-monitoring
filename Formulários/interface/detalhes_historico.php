@@ -50,7 +50,7 @@ include('includes/header.php');
 
     <div style="display: flex; gap: 20px; margin: 20px 0; font-family: sans-serif;">
         <div style="flex:1; background:#fff; padding:15px; border-top:5px solid #FFD700; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <h4 style="margin:0; color:#856404;">🏆 MVP Atividade</h4>
+            <h4 style="margin:0; color:#856404;">🏆 Marsami mais ativo</h4>
             <p style="font-size: 1.1rem; margin:10px 0;">Marsami <b>#<?php echo $stats_mvp['IDMarsami'] ?? '?'; ?></b></p>
             <small><?php echo $stats_mvp['TotalPassagens'] ?? 0; ?> passagens</small>
         </div>
