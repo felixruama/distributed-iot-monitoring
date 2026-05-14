@@ -1,5 +1,5 @@
 <?php
-include "db_config.php"; // Garante que este ficheiro tem a tua ligação à BD
+include "db_config.php"; // Garante que esteuu ficheiro tem a tua ligação à BD
 
 $user_id = $_GET['user_id'];
 $query = "CALL SP_GetResumoFinal($user_id)";
