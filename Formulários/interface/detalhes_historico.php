@@ -20,7 +20,6 @@ if (!$id_simulacao) {
 }
 
 // --- BLOCO 1: DADOS GERAIS (Via PDO/SPManager) ---
-// A SP já devolve o campo 'motivo_fim'
 $resultados = $spManager->getData('SP_VisualizarDetalhes_Historico', [(int)$id_simulacao]);
 $dados = $resultados[0] ?? null;
 
@@ -29,12 +28,14 @@ if (!$dados) {
 }
 
 // --- BLOCO 2: ESTATÍSTICAS AVANÇADAS (Via mysqli para multi_query) ---
-$stats_mvp = null; $stats_explora = null; $stats_sala = null; $stats_counts = null;
+$stats_mvp = null;
+$stats_explora = null;
+$stats_sala = null;
+$stats_distribuicao = []; // Agora é um array para a lista de salas
 
 $conn = new mysqli('mysql', 'root', 'root', 'labirinto_DB');
 
 if (!$conn->connect_error) {
-    // Executa a SP que devolve 4 SELECTs (MVP, Explorador, Hotspot, Odd/Even)
     if (mysqli_multi_query($conn, "CALL SP_EstatisticasFinaisSimulacao($id_simulacao)")) {
 
         // 1. Lê MVP
@@ -55,11 +56,14 @@ if (!$conn->connect_error) {
             if ($res) { $stats_sala = mysqli_fetch_assoc($res); mysqli_free_result($res); }
         }
 
-        // 4. Lê Contagem Odd e Even (Novo Requisito)
+        // 4. Lê Lista de Contagem Odd e Even por Sala
         if (mysqli_more_results($conn)) {
             mysqli_next_result($conn);
             $res = mysqli_store_result($conn);
-            if ($res) { $stats_counts = mysqli_fetch_assoc($res); mysqli_free_result($res); }
+            if ($res) {
+                $stats_distribuicao = mysqli_fetch_all($res, MYSQLI_ASSOC);
+                mysqli_free_result($res);
+            }
         }
     }
     $conn->close();
@@ -103,15 +107,19 @@ include('includes/header.php');
             <span style="color: #666; font-size: 0.9rem;"><?php echo $stats_sala['TotalEntradas'] ?? 0; ?> visitas totais</span>
         </div>
 
-        <div style="flex:1; background:#fff; padding:20px; border-top:5px solid #6f42c1; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-            <h4 style="margin:0; color:#4b2394; font-size: 0.85rem; text-transform: uppercase;">🤖 Distribuição</h4>
-            <div style="margin-top: 15px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom: 5px; font-size: 0.9rem;">
-                    <span>Ímpares (Odd):</span> <strong><?php echo $stats_counts['TotalOdd'] ?? 0; ?></strong>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size: 0.9rem;">
-                    <span>Pares (Even):</span> <strong><?php echo $stats_counts['TotalEven'] ?? 0; ?></strong>
-                </div>
+        <div style="flex:1; background:#fff; padding:20px; border-top:5px solid #6f42c1; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-height: 180px; overflow-y: auto;">
+            <h4 style="margin:0 0 10px 0; color:#4b2394; font-size: 0.85rem; text-transform: uppercase;">🤖 Robôs por Sala</h4>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <?php if (!empty($stats_distribuicao)): ?>
+                    <?php foreach ($stats_distribuicao as $row): ?>
+                        <div style="display:flex; justify-content:space-between; font-size: 0.8rem; border-bottom: 1px solid #eee; padding-bottom: 2px;">
+                            <span><strong>Sala <?php echo $row['Sala']; ?>:</strong></span>
+                            <span>Odd: <?php echo $row['NumeroMarsamisOdd']; ?> | Even: <?php echo $row['NumeroMarsamisEven']; ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <span style="font-size: 0.8rem; color: #999;">Sem dados de ocupação.</span>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -153,11 +161,11 @@ include('includes/header.php');
 
         <div class="params-list" style="display: flex; flex-direction: column; gap: 8px;">
             <?php
+                // Removidas as linhas de Periodicidade e Intervalo de Alertas
                 $params = [
                     ['Temperaturas Críticas:', 'Mín: ' . ($dados['TempMin'] ?? '0.00') . '°C / Máx: ' . ($dados['TempMax'] ?? '0.00') . '°C'],
                     ['Ruído Crítico:', ($dados['RuidoMax'] ?? '0.00') . ' dB'],
-                    ['Periodicidade de Leitura:', ($dados['Periodicidade'] ?? 'N/A') . ' segundos'],
-                    ['Intervalo entre Alertas:', ($dados['IntervaloAlertas'] ?? 'N/A') . ' segundos']
+                    ['Pontuação Acumulada:', ($dados['Pontos'] ?? '0') . ' pts']
                 ];
 
                 foreach ($params as $p): ?>
@@ -166,11 +174,6 @@ include('includes/header.php');
                     <span style="color: #666;"><?php echo $p[1]; ?></span>
                 </div>
             <?php endforeach; ?>
-        </div>
-
-        <div style="margin-top: 25px; padding: 12px; background-color: #f0f7ff; border-radius: 8px; color: #007bff; font-size: 0.85rem; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-eye"></i>
-            <span><strong>Modo de visualização:</strong> Apenas o criador desta simulação pode editar estes parâmetros na página de Configuração.</span>
         </div>
     </section>
 
