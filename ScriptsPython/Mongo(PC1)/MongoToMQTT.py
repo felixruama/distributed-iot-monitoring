@@ -229,6 +229,16 @@ def processar_movimentos_main():
                     if origem != 0:
                         if not any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global):
                             raise ValueError("Corredor inválido")
+                    else:
+                        # ORIGEM É 0: Vamos ver no Mongo se JÁ EXISTIA um registo válido antes deste!
+                        duplicado = db.Movimento.find_one({
+                            "Marsami": marsami_id,
+                            "RoomOrigin": 0,
+                            "Anomalia": False,
+                            "_id": {"$lt": doc["_id"]} # A magia está aqui: procura apenas documentos mais antigos que este
+                        })
+                        if duplicado:
+                            raise ValueError(f"Marsami {marsami_id} já tinha saído da sala 0 anteriormente (Duplicado).")
                     batch_data.append({**doc, "_id": str(doc["_id"])})
                 except Exception as err:
                     db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True}})
@@ -307,9 +317,29 @@ def obter_valores_iniciais_nuvem():
         else: return 20.0, 20.0, 10, corredores
     except Exception as e: return 20.0, 20.0, 10, []
 
+def recuperar_historico_sensores(som_base, temp_base):
+    global historico_som, historico_temp
+
+    # Recupera os últimos 5 registos válidos de Som
+    ultimos_som = list(db["Som"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    if ultimos_som:
+        # Fazemos reverse para a lista ficar do mais antigo para o mais recente
+        historico_som = [float(doc["Sound"]) for doc in reversed(ultimos_som)]
+    else:
+        historico_som = [som_base]
+
+    # Recupera os últimos 5 registos válidos de Temperatura
+    ultimos_temp = list(db["Temperatura"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    if ultimos_temp:
+        historico_temp = [float(doc["Temperature"]) for doc in reversed(ultimos_temp)]
+    else:
+        historico_temp = [temp_base]
+
+    print(f"[INIT] Histórico recuperado do Mongo! Som: {historico_som} | Temp: {historico_temp}")
+
 if __name__ == "__main__":
     carregar_estado_local()
     som_base, temp_base, max_marsamis_global, lista_corredores_global = obter_valores_iniciais_nuvem()
-    historico_som.append(som_base); historico_temp.append(temp_base)
+    recuperar_historico_sensores(som_base, temp_base)
     threading.Thread(target=processar_som_temperatura_sec, daemon=True).start()
     processar_movimentos_main()
