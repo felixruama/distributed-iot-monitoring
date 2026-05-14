@@ -1,6 +1,6 @@
 <?php
 // O host no Docker é sempre 'mysql'
-$host = 'mysql'; 
+$host = 'mysql';
 
 // A MAGIA: Em vez de forçar o 'root', vamos apanhar as credenciais que o Android manda!
 // Usamos $_REQUEST para apanhar quer venha por GET ou POST.
@@ -17,7 +17,7 @@ if (empty($user) || empty($pass)) {
 $conn = new mysqli($host, $user, $pass, $db);
 
 // Se a password estiver errada ou o utilizador não existir no MySQL, falha aqui!
-if ($conn->connect_error) { 
-    die(json_encode(["success" => false, "message" => "Erro de autenticação na BD: " . $conn->connect_error])); 
+if ($conn->connect_error) {
+    die(json_encode(["success" => false, "message" => "Erro de autenticação na BD: " . $conn->connect_error]));
 }
 ?>
