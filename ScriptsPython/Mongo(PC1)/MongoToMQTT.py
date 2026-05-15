@@ -313,18 +313,30 @@ def processar_movimentos_main():
             time.sleep(5)
 
 def obter_valores_iniciais_nuvem():
-    try:
-        print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
-        conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
-        cursor = conexao_nuvem.cursor(dictionary=True)
-        cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
-        resultado = cursor.fetchone()
-        cursor.execute("SELECT Rooma, Roomb FROM corridor")
-        corredores = cursor.fetchall()
-        if resultado:
-            return float(resultado['normalnoise']), float(resultado['normaltemperature']), int(resultado['numbermarsamis']), corredores
-        else: return 20.0, 20.0, 10, corredores
-    except Exception as e: return 20.0, 20.0, 10, []
+    #nao prossegue ate ter os valores da nuvem corretamente
+    while True:
+        try:
+            print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
+            conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
+            cursor = conexao_nuvem.cursor(dictionary=True)
+            cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
+            resultado = cursor.fetchone()
+            cursor.execute("SELECT Rooma, Roomb FROM corridor")
+            corredores = cursor.fetchall()
+
+            cursor.close()
+            conexao_nuvem.close()
+
+            if resultado and corredores:
+                print("[INIT] Configurações da Nuvem obtidas com sucesso!")
+                return float(resultado['normalnoise']), float(resultado['normaltemperature']), int(resultado['numbermarsamis']), corredores
+            else:
+                print("[INIT] Dados incompletos na Nuvem. A tentar novamente...")
+
+        except Exception as e:
+            print(f"[ERRO INIT] Falha ao ligar à Nuvem: {e}. A tentar de novo em 5 segundos...")
+
+        time.sleep(5) # espera 5 segundos e tenta de novo antes de deixar o script arrancar
 
 def recuperar_historico_sensores(som_base, temp_base):
     global historico_som, historico_temp
