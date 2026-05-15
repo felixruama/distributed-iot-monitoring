@@ -7,7 +7,7 @@ include('includes/header.php');
 <div class="container">
     <div style="margin-bottom: 30px;">
         <a href="dashboard.php" class="btn-back" style="text-decoration: none; color: var(--tech-blue); font-weight: bold;">← Voltar</a>
-        <h1 style="margin-top: 20px;">Nova Simulação</h1>
+        <h1 style="margin-top: 20px;"> Nova Simulação</h1>
     </div>
 
     <div class="card" style="max-width: 800px; margin: 0 auto;">
