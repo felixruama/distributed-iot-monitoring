@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 #python export_data.py <ID_simulação>
 
-MONGO_URI = "mongodb://localhost:27017/?directConnection=true"
+MONGO_URI = "mongodb://mongodb1:27018,mongodb2:27019,mongodb3:27020/?replicaSet=rs0"
 DB_NAME = "sensores_db"
 COLECOES = ["Som", "Temperatura", "Movimento"]
 

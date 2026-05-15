@@ -12,7 +12,7 @@ from bson.objectid import ObjectId
 
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
-parser.add_argument('--mongo', type=str, default="mongodb://root:root@localhost:27017/?directConnection=true", help="URI do MongoDB")
+parser.add_argument('--mongo', type=str, default="mongodb://mongodb1:27018,mongodb2:27019,mongodb3:27020/?replicaSet=rs0", help="URI do MongoDB")
 args = parser.parse_args()
 
 db = MongoClient(args.mongo)["sensores_db"]
