@@ -7,7 +7,7 @@ include('includes/header.php');
 <div class="container">
     <div style="margin-bottom: 30px;">
         <a href="dashboard.php" class="btn-back" style="text-decoration: none; color: var(--tech-blue); font-weight: bold;">← Voltar</a>
-        <h1 style="margin-top: 20px;">Nova Simulação Completa</h1>
+        <h1 style="margin-top: 20px;">Nova Simulação</h1>
     </div>
 
     <div class="card" style="max-width: 800px; margin: 0 auto;">
@@ -25,14 +25,14 @@ include('includes/header.php');
                 <div class="form-group-alt">
                     <label>Temperatura Mínima (°C)</label>
                     <div class="input-pill">
-                        <input type="number" name="temp_min" value="18" required>
+                        <input type="number" name="temp_min" value="5" required>
                         <i class="fas fa-thermometer-empty"></i>
                     </div>
                 </div>
                 <div class="form-group-alt">
                     <label>Temperatura Máxima (°C)</label>
                     <div class="input-pill">
-                        <input type="number" name="temp_max" value="30" required>
+                        <input type="number" name="temp_max" value="35" required>
                         <i class="fas fa-thermometer-full"></i>
                     </div>
                 </div>
@@ -40,7 +40,7 @@ include('includes/header.php');
                 <div class="form-group-alt">
                     <label>Ruído Máximo (dB)</label>
                     <div class="input-pill">
-                        <input type="number" name="ruido_max" value="80" required>
+                        <input type="number" name="ruido_max" value="25" required>
                         <i class="fas fa-volume-up"></i>
                     </div>
                 </div>
