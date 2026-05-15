@@ -92,31 +92,37 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
                         # Encontra o corredor com mais tráfego
                         (origem, destino) = max(historico_corredores, key=historico_corredores.get)
                         
-                    msg = f"{{Type: CloseDoor, Player: {N_JOGADOR}, RoomOrigin: {origem}, RoomDestiny: {destino}}}"
-                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                    
                     try:
-                        # Atualiza a BD para que, se houver crash, a informação de porta fechada sobreviva
+                        # 1. PRIMEIRO: Garantimos a memória! (Regista na BD)
                         db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (origem, destino, id_simulacao_atual))
                         db_conn.commit()
                         portas_fechadas = True
+                        
+                        # 2. DEPOIS: Dispara o atuador para o jogo!
+                        msg = f"{{Type: CloseDoor, Player: {N_JOGADOR}, RoomOrigin: {origem}, RoomDestiny: {destino}}}"
+                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
                         print(f"[ATUADOR SOM] Fechou corredor: {origem}->{destino}. Comando: {msg}")
+                        
                     except Exception as e:
-                        print(f"[ERRO SQL] Falha ao fechar corredor: {e}")
+                        print(f"[ERRO SQL] Falha ao fechar corredor na BD. O atuador NÃO foi disparado por segurança: {e}")
                         
             else:
                 # O som está normal. Se havia portas fechadas, reabre-as.
                 if portas_fechadas:
-                    msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
-                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
                     try:
+                        # 1. PRIMEIRO: Atualiza a memória na BD!
                         db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
                         db_conn.commit()
                         portas_fechadas = False
                         historico_corredores.clear()
+                        
+                        # 2. DEPOIS: Dispara o atuador físico
+                        msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
+                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
                         print(f"[ATUADOR SOM] Nível normalizou. Comando: {msg}")
+                        
                     except Exception as e:
-                        print(f"[ERRO SQL] Falha ao reabrir portas: {e}")
+                        print(f"[ERRO SQL] Falha ao reabrir portas na BD. Atuador NÃO disparado: {e}")
 
 def verificar_gatilho_marsamis(client, sala):
     """ Latência Zero: Usa dicionário in-memory em vez de Query ao MySQL """
