@@ -27,6 +27,7 @@ TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
 TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}"
 TOPIC_ACTUATORS = "pisid_mazeact"
+TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 
 # Estado Global
 last_inserted_id = None
@@ -149,6 +150,11 @@ def procurar_simulacao_ativa():
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
             print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
+            periodicidade_bd = resultado[4]
+            if periodicidade_bd is not None:
+                config_payload = {"Periodicidade": periodicidade_bd}
+                mqtt_client.publish(TOPIC_CONFIG, json.dumps(config_payload), qos=2)
+                print(f"[CONFIG] Periodicidade ({periodicidade_bd}s) enviada para o PC1!")
         else:
             print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
             id_simulacao_atual = None
