@@ -45,13 +45,11 @@ limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
 ocupacao_memoria = {}
 historico_corredores = {}
 portas_fechadas = False
-estado_ac = None # NOVO: Guarda o estado do AC para evitar spam
+estado_ac = None
 DELTA_MAXIMO = 5
-margemAlerta = 5
+margemAlertaSom = 5
+margemAlertaTemp = 5
 
-# ==========================================
-# FUNÇÕES DE ATUADORES / GATILHOS
-# ==========================================
 def mensagem_recente(hora_str):
     """ Filtro Temporal Delta (Tolerância a Falhas) """
     if not hora_str: return True # Movimentos passam sempre para calcular o Score!
@@ -62,64 +60,81 @@ def mensagem_recente(hora_str):
         delta = (datetime.now() - msg_time).total_seconds()
         return abs(delta) <= DELTA_MAXIMO
     except:
-        # Bloqueia as datas impossíveis (ex: 2025-05-32) do professor
         return False
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
-    global portas_fechadas, historico_corredores, estado_ac, margemAlerta
+    global portas_fechadas, historico_corredores, estado_ac, margemAlertaSom, margemAlertaTemp
     
     if sensor_type == 'T':
-        t_max = limites_alerta['temp_max'] - margemAlerta
-        
+        t_max = limites_alerta['temp_max'] - margemAlertaTemp
+        t_min = limites_alerta['temp_min'] + margemAlertaTemp
+
+        # 1. Está muito calor -> LIGA O AC
         if limites_alerta['temp_max'] is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
             estado_ac = 'ON'
-            print("[ATUADOR] Ar Condicionado LIGADO")
+            print(f"[ATUADOR] Ar Condicionado LIGADO (Ativado aos {valor}ºC)")
             
-        # Desliga o AC assim que a temperatura voltar a baixar do limite
-        elif limites_alerta['temp_max'] is not None and valor <= t_max and estado_ac == 'ON':
+        # 2. A temperatura já desceu para um valor seguro (ex: 2 graus abaixo do t_max) -> DESLIGA O AC
+        elif limites_alerta['temp_max'] is not None and valor <= (t_max - 2) and estado_ac == 'ON':
             msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
             estado_ac = 'OFF'
-            print("[ATUADOR] Ar Condicionado DESLIGADO (Temperatura normalizou)")
+            print(f"[ATUADOR] Ar Condicionado DESLIGADO (Temperatura normalizou para {valor}ºC)")
+
+        # 3. Proteção Contra Frio Extremo: O labirinto está a congelar naturalmente -> GARANTE AC DESLIGADO
+        elif limites_alerta['temp_min'] is not None and valor < t_min and estado_ac != 'OFF':
+            msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
+            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+            estado_ac = 'OFF'
+            print(f"[ATUADOR] Ar Condicionado DESLIGADO por segurança (Muito frio: {valor}ºC)")
             
     elif sensor_type == 'S':
         if limites_alerta['som_max'] is not None:
-            s_max = limites_alerta['som_max'] - margemAlerta
+            s_max = limites_alerta['som_max'] - margemAlertaSom
             if valor > s_max:
-                # O som está alto! MODO EXTREMO: Usar o comando global para forçar o simulador a baixar o som!
-                try:
-                    # 1. Tranca na Base de Dados LOCAL (para o teu script saber que fechou tudo)
-                    db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSimulacao = %s", (id_simulacao_atual,))
-                    db_conn.commit()
-                    portas_fechadas = True 
-                    
-                    # 2. Dispara o super-comando MQTT que o mazerun exige!
-                    msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
-                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                    
-                    print(f"[ATUADOR SOM] MODO EXTREMO ATIVADO! Comando CloseAllDoor enviado. Nível: {valor}dB.")
-                except Exception as e:
-                    print(f"[ERRO SQL] Falha ao fechar todas as portas: {e}")
+                # O som está alto! MODO EXTREMO
+                if not portas_fechadas:
+                    try:
+                        # 1. Tranca na Base de Dados LOCAL
+                        db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                        db_conn.commit()
+                        portas_fechadas = True 
+                        
+                        # 2. Dispara o super-comando MQTT
+                        msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
+                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                        
+                        print(f"[ATUADOR SOM] Nível de som crítico ({valor}dB). Todas as portas fechadas.")
+                    except Exception as e:
+                        print(f"[ERRO SQL] Falha ao fechar todas as portas: {e}")
                         
             else:
-                # O som normalizou! Vamos reabrir as portas todas.
+                # O som normalizou!
                 if portas_fechadas:
                     try:
-                        db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
-                        db_conn.commit()
-                        portas_fechadas = False
-                        historico_corredores.clear()
+                        # Verifica se a simulação já terminou (Estado = '2')
+                        db_cursor.execute("SELECT Estado FROM simulacao WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                        res_estado = db_cursor.fetchone()
                         
-                        msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
-                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                        print(f"[ATUADOR SOM] Nível normalizou ({valor}dB). Todas as portas reabertas.")
+                        if res_estado and res_estado[0] == '2':
+                            print("[ATUADOR SOM] Simulação já terminou! As portas vão permanecer seladas.")
+                            portas_fechadas = False 
+                        else:
+                            db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                            db_conn.commit()
+                            portas_fechadas = False
+                            historico_corredores.clear()
+                            
+                            msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
+                            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                            print(f"[ATUADOR SOM] Nível normalizou ({valor}dB). Todas as portas reabertas.")
+                            
                     except Exception as e:
                         print(f"[ERRO SQL] Falha ao reabrir portas: {e}")
-
+                        
 def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
-    """ Revertido para usar a fonte de verdade segura (Base de Dados MySQL) """
     try:
         cursor.execute("SELECT NumeroMarsamisOdd, NumeroMarsamisEven FROM ocupacaolabirinto WHERE Sala = %s AND IDSimulacao = %s", (sala, id_simulacao))
         resultado = cursor.fetchone()
@@ -135,7 +150,7 @@ def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
             
 def carregar_limites_nuvem():
     global limites_termino
-    while True: # fica em loop ate conseguir os dados da nuvem
+    while True:
         try:
             print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
             nuvem_conn = mysql.connector.connect(
@@ -167,7 +182,7 @@ def carregar_limites_nuvem():
         except Exception as e:
             print(f"[ERRO NUVEM] Falha ao carregar limites: {e}. A tentar de novo em 5 segundos...")
 
-        time.sleep(5) #espera antes de voltar a tentar
+        time.sleep(5)
 
 def manter_conexao_viva():
     global db_conn, db_cursor
@@ -198,12 +213,6 @@ def procurar_simulacao_ativa():
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
             print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
-            
-            # ==========================================================
-            # 🛡️ RECUPERAÇÃO DE DESASTRE (BULLETPROOF BOOT)
-            # ==========================================================
-            
-            # 1. Recuperar o estado das Portas
             db_cursor.execute("SELECT COUNT(*) FROM corredor WHERE Aberto = 0 AND IDSimulacao = %s", (id_simulacao_atual,))
             res_portas = db_cursor.fetchone()
             if res_portas and res_portas[0] > 0:
@@ -211,9 +220,6 @@ def procurar_simulacao_ativa():
                 print("[BULLETPROOF] Recuperado: Existem portas fechadas nesta simulação.")
             else:
                 portas_fechadas = False
-
-            # 3. A TUA IDEIA: Recuperar o Histórico de Corredores (Mapa de Tráfego para o Som)
-            # Vamos buscar os últimos 30 movimentos válidos (que não sejam 0 -> 0) para saber onde anda o barulho
             db_cursor.execute("""
                 SELECT SalaOrigem, SalaDestino 
                 FROM medicoespassagens 
@@ -227,7 +233,6 @@ def procurar_simulacao_ativa():
                 corredor = (origem, destino)
                 historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
             print(f"[BULLETPROOF] Recuperado: Histórico de tráfego reconstruído a partir dos últimos {len(res_movimentos)} movimentos.")
-            # ==========================================================
             periodicidade_bd = resultado[4]
             if periodicidade_bd is not None:
                 config_payload = {"Periodicidade": periodicidade_bd}
@@ -243,7 +248,6 @@ def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC2 Ligado (Código: {rc})")
     client.subscribe([(TOPIC_MOV, 2), (TOPIC_TEMP, 0), (TOPIC_SOM, 0), (TOPIC_PING, 2)])
 
-    # --- ESTRATÉGIA GENIAL: Ao ligar/reiniciar, grita para a rede o último ID que tem guardado ---
     if id_simulacao_atual is not None and manter_conexao_viva():
         try:
             db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
@@ -271,19 +275,16 @@ def on_message(client, userdata, msg):
             salas_para_verificar = set() 
             
             for mov in payload:
-                # 1. Filtro Temporal (Se for muito antiga, não vai para os atuadores)
                 is_recente = mensagem_recente(mov.get('Hour'))
                 
                 marsami_id = int(mov['Marsami'])
                 origem = mov['RoomOrigin']
                 destino = mov['RoomDestiny']
-                
-                # 2. Atualizar Histórico de Fluxo (usado pelo gatilho do Som)
+
                 if destino != 0 and origem != 0:
                     corredor = (origem, destino)
                     historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
                     
-                # 3. Gravar na Base de Dados (Mesmo mensagens antigas são guardadas)
                 try:
                     db_cursor.callproc('SP_RegistarPassagem', [
                         id_simulacao_atual, mov['Marsami'], mov['RoomOrigin'],
@@ -307,7 +308,6 @@ def on_message(client, userdata, msg):
                     verificar_gatilho_marsamis(client, sala, id_simulacao_atual, db_cursor)
 
         elif msg.topic == TOPIC_PING:
-            # ... (código do PING mantém-se inalterado) ...
             try:
                 db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
                 resultado = db_cursor.fetchone()
