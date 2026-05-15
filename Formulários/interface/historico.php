@@ -43,6 +43,7 @@ include('includes/header.php');
             <div class="sim-meta" style="margin: 8px 0; color: #666; font-size: 0.9rem;">
                 <span><strong>Criador:</strong> <?php echo htmlspecialchars($registo['NomeCriador'] ?? 'Desconhecido'); ?></span> |
                 <span><strong>Início:</strong> <?php echo $registo['DataHoraInicio'] ?? '---'; ?></span>
+                <span style="color: #b30000;"><strong>Motivo:</strong> <?php echo htmlspecialchars($registo['motivo_fim'] ?? 'Desconhecido'); ?></span>
             </div>
             <span class="badge" style="background-color: #d4edda; color: #155724; padding: 4px 10px; border-radius: 10px; font-size: 0.8rem;">
                 Estado: Terminada

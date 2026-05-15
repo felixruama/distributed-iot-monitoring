@@ -226,9 +226,28 @@ def processar_movimentos_main():
                     marsami_id = int(doc["Marsami"])
                     origem, destino = int(doc["RoomOrigin"]), int(doc["RoomDestiny"])
                     if not (1 <= marsami_id <= max_marsamis_global): raise ValueError("Marsami inválido")
+
                     if origem != 0:
+                        # 1. MOVIMENTO NORMAL: Verifica se o corredor existe
                         if not any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global):
                             raise ValueError("Corredor inválido")
+
+                    elif destino != 0:
+                        # 2. LARGADA INICIAL (Origem 0 -> Destino X): Verifica duplicados
+                        duplicado = db.Movimento.find_one({
+                            "Marsami": marsami_id,
+                            "RoomOrigin": 0,
+                            "RoomDestiny": {"$ne": 0}, # Garante que procura apenas outras largadas
+                            "Anomalia": False,
+                            "_id": {"$lt": doc["_id"]}
+                        })
+                        if duplicado:
+                            raise ValueError(f"Marsami {marsami_id} já tinha sido largado anteriormente (Duplicado).")
+
+                    else:
+                        # 3. EVENTO DE CANSAÇO/IMOBILIZAÇÃO (Origem 0 -> Destino 0)
+                        # Este evento é sempre legítimo de passar para o MySQL lidar.
+                        pass
                     batch_data.append({**doc, "_id": str(doc["_id"])})
                 except Exception as err:
                     db.Movimento.update_one({"_id": doc["_id"]}, {"$set": {"Anomalia": True}})
@@ -294,22 +313,54 @@ def processar_movimentos_main():
             time.sleep(5)
 
 def obter_valores_iniciais_nuvem():
-    try:
-        print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
-        conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
-        cursor = conexao_nuvem.cursor(dictionary=True)
-        cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
-        resultado = cursor.fetchone()
-        cursor.execute("SELECT Rooma, Roomb FROM corridor")
-        corredores = cursor.fetchall()
-        if resultado:
-            return float(resultado['normalnoise']), float(resultado['normaltemperature']), int(resultado['numbermarsamis']), corredores
-        else: return 20.0, 20.0, 10, corredores
-    except Exception as e: return 20.0, 20.0, 10, []
+    #nao prossegue ate ter os valores da nuvem corretamente
+    while True:
+        try:
+            print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
+            conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
+            cursor = conexao_nuvem.cursor(dictionary=True)
+            cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
+            resultado = cursor.fetchone()
+            cursor.execute("SELECT Rooma, Roomb FROM corridor")
+            corredores = cursor.fetchall()
+
+            cursor.close()
+            conexao_nuvem.close()
+
+            if resultado and corredores:
+                print("[INIT] Configurações da Nuvem obtidas com sucesso!")
+                return float(resultado['normalnoise']), float(resultado['normaltemperature']), int(resultado['numbermarsamis']), corredores
+            else:
+                print("[INIT] Dados incompletos na Nuvem. A tentar novamente...")
+
+        except Exception as e:
+            print(f"[ERRO INIT] Falha ao ligar à Nuvem: {e}. A tentar de novo em 5 segundos...")
+
+        time.sleep(5) # espera 5 segundos e tenta de novo antes de deixar o script arrancar
+
+def recuperar_historico_sensores(som_base, temp_base):
+    global historico_som, historico_temp
+
+    # Recupera os últimos 5 registos válidos de Som
+    ultimos_som = list(db["Som"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    if ultimos_som:
+        # Fazemos reverse para a lista ficar do mais antigo para o mais recente
+        historico_som = [float(doc["Sound"]) for doc in reversed(ultimos_som)]
+    else:
+        historico_som = [som_base]
+
+    # Recupera os últimos 5 registos válidos de Temperatura
+    ultimos_temp = list(db["Temperatura"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    if ultimos_temp:
+        historico_temp = [float(doc["Temperature"]) for doc in reversed(ultimos_temp)]
+    else:
+        historico_temp = [temp_base]
+
+    print(f"[INIT] Histórico recuperado do Mongo! Som: {historico_som} | Temp: {historico_temp}")
 
 if __name__ == "__main__":
     carregar_estado_local()
     som_base, temp_base, max_marsamis_global, lista_corredores_global = obter_valores_iniciais_nuvem()
-    historico_som.append(som_base); historico_temp.append(temp_base)
+    recuperar_historico_sensores(som_base, temp_base)
     threading.Thread(target=processar_som_temperatura_sec, daemon=True).start()
     processar_movimentos_main()

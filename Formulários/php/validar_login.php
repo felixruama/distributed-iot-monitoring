@@ -27,6 +27,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 exit();
             }
 
+            if ($user['Equipa'] != 7) {
+                header("Location: ../interface/index.php?erro=" . urlencode("Acesso negado: Apenas os membros da Equipa 7 podem entrar neste site."));
+                exit();
+            }
+
             // Se chegou aqui, é porque é 'Utilizador'. Criamos a sessão.
             $_SESSION['IDUtilizador'] = $user['IDUtilizador'];
             $_SESSION['user_nome']    = $user['Nome'];

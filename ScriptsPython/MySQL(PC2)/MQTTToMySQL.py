@@ -3,6 +3,7 @@ import json
 import mysql.connector
 import paho.mqtt.client as mqtt
 import argparse # Importado para ler argumentos da consola
+import time
 
 parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
@@ -32,6 +33,8 @@ last_inserted_id = None
 db_conn = None
 db_cursor = None
 id_simulacao_atual = None
+motivo=None
+jadeuprint=False
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
@@ -85,25 +88,39 @@ def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
 
 def carregar_limites_nuvem():
     global limites_termino
-    try:
-        print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
-        nuvem_conn = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
-        cursor = nuvem_conn.cursor(dictionary=True)
-        cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
-        resultado = cursor.fetchone()
+    while True: # fica em loop ate conseguir os dados da nuvem
+        try:
+            print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
+            nuvem_conn = mysql.connector.connect(
+                host="194.210.86.10",
+                user="aluno",
+                password="aluno",
+                database="maze",
+                connect_timeout=5
+            )
+            cursor = nuvem_conn.cursor(dictionary=True)
+            cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
+            resultado = cursor.fetchone()
 
-        if resultado:
-            t_normal = float(resultado['normaltemperature'])
-            s_normal = float(resultado['normalnoise'])
-            limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
-            limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
-            limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
-            print(f"[NUVEM] Limites de FIM DE JOGO: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
+            if resultado:
+                t_normal = float(resultado['normaltemperature'])
+                s_normal = float(resultado['normalnoise'])
+                limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
+                limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
+                limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
 
-        cursor.close()
-        nuvem_conn.close()
-    except Exception as e:
-        print(f"[ERRO NUVEM] Falha ao carregar limites de término: {e}")
+                print(f"[NUVEM] Limites de FIM DE JOGO obtidos: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
+
+                cursor.close()
+                nuvem_conn.close()
+                break # deixa o script continuar
+            else:
+                print("[NUVEM] Dados incompletos na base de dados remota.")
+
+        except Exception as e:
+            print(f"[ERRO NUVEM] Falha ao carregar limites: {e}. A tentar de novo em 5 segundos...")
+
+        time.sleep(5) #espera antes de voltar a tentar
 
 def manter_conexao_viva():
     global db_conn, db_cursor
@@ -118,7 +135,7 @@ def manter_conexao_viva():
     return True
 
 def procurar_simulacao_ativa():
-    global id_simulacao_atual, limites_alerta
+    global id_simulacao_atual, limites_alerta, jadeuprint
     if not manter_conexao_viva(): return
     try:
         db_conn.commit()
@@ -127,6 +144,7 @@ def procurar_simulacao_ativa():
 
         if resultado:
             id_simulacao_atual = resultado[0]
+            jadeuprint=False
             limites_alerta['temp_max'] = float(resultado[1]) if resultado[1] else None
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
@@ -154,7 +172,7 @@ def on_connect(client, userdata, flags, rc):
             print(f"[AVISO BOOT] Não foi possível verificar o último ID no MySQL no arranque: {e}")
 
 def on_message(client, userdata, msg):
-    global last_inserted_id, id_simulacao_atual
+    global last_inserted_id, id_simulacao_atual, motivo, jadeuprint
 
     if not manter_conexao_viva(): return
     if id_simulacao_atual is None:
@@ -219,7 +237,7 @@ def on_message(client, userdata, msg):
             hora_sensor = payload.get('Hour')
             sensor_type = 'T' if 'Temperature' in payload else 'S'
             is_alerta = False
-            is_terminar = False
+            is_terminar= False
             tipo_alerta = ""
             texto_mensagem = ""
 
@@ -233,8 +251,12 @@ def on_message(client, userdata, msg):
                     is_alerta = True
                     tipo_alerta = "Temperatura Mínima"
                     texto_mensagem = f"Atenção! A temperatura desceu para {val}ºC."
-                if limites_termino['temp_max'] is not None and (val > limites_termino['temp_max'] or val < limites_termino['temp_min']):
-                    is_terminar = True
+                if limites_termino['temp_max'] is not None and val > limites_termino['temp_max']:
+                    motivo="Temperatura max atingida"
+                    is_terminar=True
+                elif limites_termino['temp_min'] is not None and val < limites_termino['temp_min']:
+                    motivo="Temperatura min atingida"
+                    is_terminar=True
                 
             else:
                 db_cursor.execute("INSERT INTO som (Hora, Som) VALUES (%s, %s)", (hora_sensor, val))
@@ -243,15 +265,19 @@ def on_message(client, userdata, msg):
                     tipo_alerta = "Ruído Máximo"
                     texto_mensagem = f"Atenção! O nível de ruído atingiu {val}dB."
                 if limites_termino['som_max'] is not None and val > limites_termino['som_max']:
-                    is_terminar = True
+                    motivo="Som max atingido"
+                    is_terminar=True
                     
             if is_alerta:
                 db_cursor.callproc('SP_RegistarAlerta', [id_simulacao_atual, sensor_type, val, tipo_alerta, texto_mensagem, hora_sensor])
 
             if is_terminar:
-                db_cursor.callproc('SP_TerminarSimulacao', [id_simulacao_atual])
-                print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
-                id_simulacao_atual = None
+                db_cursor.execute("UPDATE simulacao SET motivo_fim = IFNULL(motivo_fim, %s) WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
+                if not jadeuprint:
+
+                    print(f"[FIM SIMULAÇÃO] Motivo: {motivo} Valor: {val}.")
+                    jadeuprint=True
+
 
             db_conn.commit()
             
