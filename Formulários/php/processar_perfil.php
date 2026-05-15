@@ -16,6 +16,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $dadosParaAtualizar = [
         "IDUtilizador" => $id_logado,
         "Nome" => $_POST['nome'],
+        "Email" => $_POST['email'],
         "Telemovel" => empty($_POST['telemovel']) ? null : $_POST['telemovel'],
         "DataNascimento" => empty($_POST['data_nascimento']) ? null : $_POST['data_nascimento']
     ];

@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 14, 2026 at 02:23 AM
+-- Generation Time: May 15, 2026 at 03:34 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -133,7 +133,7 @@ SET @qry = CONCAT('GRANT SELECT ON ', @db, '.marsami TO ', @usr); PREPARE s FROM
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.medicoespassagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.mensagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.simulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
-
+SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_GetResumoFinal TO ', @usr); PREPARE s FROM @qry; EXECUTE s; -- adicionei esta linha
 ELSEIF p_Tipo = 'Migrador' THEN
             SET @qry = CONCAT('GRANT SELECT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.som TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
@@ -207,29 +207,87 @@ END$$
 
 DROP PROCEDURE IF EXISTS `SP_EstatisticasFinaisSimulacao`$$
 CREATE DEFINER=`root`@`%` PROCEDURE `SP_EstatisticasFinaisSimulacao` (IN `p_id_simulacao` INT)   BEGIN
-    -- 1. MVP: O Marsami que mais se movimentou no total (Total de movimentos/passagens)
+    -- MVP: O Marsami que mais se movimentou no total
 SELECT IDMarsami, COUNT(*) AS TotalPassagens
-FROM historico_medicoespassagens
-WHERE IDSimulacao = p_id_simulacao
+FROM (
+         SELECT IDMarsami, IDSimulacao FROM medicoespassagens WHERE IDSimulacao = p_id_simulacao AND IDMarsami IS NOT NULL
+         UNION ALL
+         SELECT IDMarsami, IDSimulacao FROM historico_medicoespassagens WHERE IDSimulacao = p_id_simulacao AND IDMarsami IS NOT NULL
+     ) AS m
 GROUP BY IDMarsami
-ORDER BY TotalPassagens DESC
-    LIMIT 1;
+ORDER BY TotalPassagens DESC LIMIT 1;
 
--- 2. Explorador: O Marsami que visitou o maior número de salas DIFERENTES
+-- Explorador: O Marsami que visitou o maior número de salas DIFERENTES
 SELECT IDMarsami, COUNT(DISTINCT SalaDestino) AS SalasDiferentes
-FROM historico_medicoespassagens
-WHERE IDSimulacao = p_id_simulacao
+FROM (
+         SELECT IDMarsami, SalaDestino, IDSimulacao FROM medicoespassagens WHERE IDSimulacao = p_id_simulacao AND IDMarsami IS NOT NULL
+         UNION ALL
+         SELECT IDMarsami, SalaDestino, IDSimulacao FROM historico_medicoespassagens WHERE IDSimulacao = p_id_simulacao AND IDMarsami IS NOT NULL
+     ) AS e
 GROUP BY IDMarsami
-ORDER BY SalasDiferentes DESC
-    LIMIT 1;
+ORDER BY SalasDiferentes DESC LIMIT 1;
 
--- 3. Hotspot: A sala que recebeu mais entradas (A mais visitada)
+-- Hotspot: A sala que recebeu mais entradas (ignora a sala 0 do Limbo)
 SELECT SalaDestino AS Sala, COUNT(*) AS TotalEntradas
-FROM historico_medicoespassagens
-WHERE IDSimulacao = p_id_simulacao
+FROM (
+         SELECT SalaDestino, IDSimulacao FROM medicoespassagens WHERE IDSimulacao = p_id_simulacao AND SalaDestino != 0 AND SalaDestino IS NOT NULL
+         UNION ALL
+         SELECT SalaDestino, IDSimulacao FROM historico_medicoespassagens WHERE IDSimulacao = p_id_simulacao AND SalaDestino != 0 AND SalaDestino IS NOT NULL
+     ) AS h
 GROUP BY SalaDestino
-ORDER BY TotalEntradas DESC
-    LIMIT 1;
+ORDER BY TotalEntradas DESC LIMIT 1;
+
+-- Ocupação Labirinto: Robôs por Sala
+SELECT Sala, NumeroMarsamisOdd, NumeroMarsamisEven
+FROM (
+         SELECT Sala, NumeroMarsamisOdd, NumeroMarsamisEven, IDSimulacao FROM ocupacaolabirinto WHERE IDSimulacao = p_id_simulacao
+         UNION ALL
+         SELECT Sala, NumeroMarsamisOdd, NumeroMarsamisEven, IDSimulacao FROM historico_ocupacaolabirinto WHERE IDSimulacao = p_id_simulacao
+     ) AS o
+ORDER BY Sala ASC;
+END$$
+
+DROP PROCEDURE IF EXISTS `SP_GetResumoFinal`$$
+CREATE DEFINER=`root`@`%` PROCEDURE `SP_GetResumoFinal` ()   BEGIN
+    DECLARE v_id_sim INT;
+
+    -- 1. Encontrar a simulação atual (a mais recente na tabela principal 'simulacao')
+SELECT IDSimulacao INTO v_id_sim
+FROM simulacao
+ORDER BY IDSimulacao DESC LIMIT 1;
+
+-- 2. RESULTADO 1: Detalhes Gerais e Configurações (nomes exatos do teu schema)
+SELECT
+    IDSimulacao, Descricao, DataHoraInicio, DataHoraFim,
+    Pontos, motivo_fim, TempMaxAlerta, TempMinAlerta,
+    RuidoMaxAlerta, SegundosIntervaloAlertas, Criador,
+    TIMEDIFF(DataHoraFim, DataHoraInicio) AS Duracao
+FROM simulacao
+WHERE IDSimulacao = v_id_sim;
+
+-- 3. RESULTADO 2: Robô Mais Ativo (Marsami com mais movimentos)
+SELECT IDMarsami, COUNT(*) AS TotalPassagens
+FROM medicoespassagens
+WHERE IDSimulacao = v_id_sim AND IDMarsami IS NOT NULL
+GROUP BY IDMarsami
+ORDER BY TotalPassagens DESC LIMIT 1;
+
+-- 4. RESULTADO 3: Explorador (Marsami que visitou mais salas diferentes)
+SELECT IDMarsami, COUNT(DISTINCT SalaDestino) AS SalasDiferentes
+FROM medicoespassagens
+WHERE IDSimulacao = v_id_sim AND IDMarsami IS NOT NULL
+GROUP BY IDMarsami
+ORDER BY SalasDiferentes DESC LIMIT 1;
+
+-- 5. RESULTADO 4: Hotspot (Sala mais visitada)
+SELECT SalaDestino AS Sala, COUNT(*) AS TotalEntradas
+FROM medicoespassagens
+WHERE IDSimulacao = v_id_sim
+  AND SalaDestino IS NOT NULL
+  AND SalaDestino != 0 -- Ignoramos a sala 0 (assumindo que 0 é o ponto de partida/fantasma)
+GROUP BY SalaDestino
+ORDER BY TotalEntradas DESC LIMIT 1;
+
 END$$
 
 DROP PROCEDURE IF EXISTS `SP_IniciarSimulacao`$$
@@ -664,7 +722,6 @@ CREATE TABLE `historico_simulacao` (
                                        `TempMinAlerta` decimal(6,2) DEFAULT NULL,
                                        `RuidoMaxAlerta` decimal(6,2) DEFAULT NULL,
                                        `SegundosIntervaloAlertas` int DEFAULT '60',
-                                       `MargemToleranciaOutlier` decimal(6,2) DEFAULT NULL,
                                        `Periodicidade` int DEFAULT NULL,
                                        `Estado` enum('0','1','2') NOT NULL DEFAULT '0',
                                        `motivo_fim` varchar(255) DEFAULT NULL
@@ -853,7 +910,7 @@ INSERT INTO `utilizador` (`IDUtilizador`, `Nome`, `Telemovel`, `Tipo`, `Email`, 
                                                                                                                 (27, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor2@lab.pt', NULL, 1),
                                                                                                                 (28, 'João pinba', '999999999', 'Utilizador', 'joao@lab.pt', '1995-05-19', 1),
                                                                                                                 (32, 'App Android', '910000001', 'Monitor Android', 'android@lab.pt', '2000-01-01', 7),
-                                                                                                                (33, 'Membro da Equipa', '910000002', 'Utilizador', 'equipa@lab.pt', '2000-01-01', 7),
+                                                                                                                (33, 'Membro da Equipa', '910000002', 'Utilizador', 'equipa@lab.pt', '2005-01-09', 7),
                                                                                                                 (34, 'Script Migrador', '910000003', 'Migrador', 'migrador@lab.pt', '2000-01-01', 7),
                                                                                                                 (35, 'Outra Equipa', '910000002', 'Utilizador', 'outraequipa@lab.pt', '2000-01-01', 8),
                                                                                                                 (36, 'Outro user da Equipa', '910000002', 'Utilizador', 'outrouser@lab.pt', '2000-01-01', 7);
@@ -955,19 +1012,19 @@ ALTER TABLE `utilizador`
 -- AUTO_INCREMENT for table `corredor`
 --
 ALTER TABLE `corredor`
-    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDCorredor` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
 
 --
 -- AUTO_INCREMENT for table `medicoespassagens`
 --
 ALTER TABLE `medicoespassagens`
-    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDMedicao` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=175;
 
 --
 -- AUTO_INCREMENT for table `mensagens`
 --
 ALTER TABLE `mensagens`
-    MODIFY `ID` int NOT NULL AUTO_INCREMENT;
+    MODIFY `ID` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=22;
 
 --
 -- AUTO_INCREMENT for table `simulacao`
@@ -979,13 +1036,13 @@ ALTER TABLE `simulacao`
 -- AUTO_INCREMENT for table `som`
 --
 ALTER TABLE `som`
-    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDSom` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=384;
 
 --
 -- AUTO_INCREMENT for table `temperatura`
 --
 ALTER TABLE `temperatura`
-    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT;
+    MODIFY `IDTemperatura` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=241;
 
 --
 -- AUTO_INCREMENT for table `utilizador`
