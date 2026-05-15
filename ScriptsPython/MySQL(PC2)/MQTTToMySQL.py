@@ -3,6 +3,7 @@ import json
 import mysql.connector
 import paho.mqtt.client as mqtt
 import argparse # Importado para ler argumentos da consola
+from datetime import datetime, timedelta
 
 parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
@@ -32,59 +33,101 @@ last_inserted_id = None
 db_conn = None
 db_cursor = None
 id_simulacao_atual = None
-motivo=None
+motivo = None
 jadeuprint=False
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
 
+# --- VARIÁVEIS DE ATUADORES ---
+ocupacao_memoria = {}
+historico_corredores = {}
+portas_fechadas = False
+estado_ac = None # NOVO: Guarda o estado do AC para evitar spam
+DELTA_MAXIMO = 15 # AUMENTADO: 5 segundos é muito apertado se houver lag na rede
+
 # ==========================================
 # FUNÇÕES DE ATUADORES / GATILHOS
 # ==========================================
+def mensagem_recente(hora_str):
+    """ Filtro Temporal Delta (Tolerância a Falhas) """
+    if not hora_str: return False
+    try:
+        # Tenta interpretar a string da hora da mensagem
+        msg_time = datetime.strptime(hora_str, "%Y-%m-%d %H:%M:%S")
+        delta = (datetime.now() - msg_time).total_seconds()
+        return abs(delta) <= DELTA_MAXIMO
+    except:
+        return True # Fallback caso a formatação de hora falhe
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
-    """
-    Compara o valor lido com os limites de alerta guardados em memória.
-    Dispara os atuadores correspondentes para a nuvem do professor.
-    """
+    global portas_fechadas, historico_corredores, estado_ac
+    
     if sensor_type == 'T':
         t_max = limites_alerta['temp_max']
         t_min = limites_alerta['temp_min']
         
-        if t_max is not None and valor > t_max:
+        # Só liga se ainda não estiver ligado (evita spam)
+        if t_max is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Temp {valor}ºC > Max ({t_max}ºC). Comando: {msg}")
+            estado_ac = 'ON'
+            print("[ATUADOR] Ar Condicionado LIGADO")
             
-        elif t_min is not None and valor < t_min:
+        # Só desliga se ainda não estiver desligado (evita spam)
+        elif t_min is not None and valor < t_min and estado_ac != 'OFF':
             msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Temp {valor}ºC < Min ({t_min}ºC). Comando: {msg}")
+            estado_ac = 'OFF'
+            print("[ATUADOR] Ar Condicionado DESLIGADO")
             
     elif sensor_type == 'S':
         s_max = limites_alerta['som_max']
-        if s_max is not None and valor > s_max:
-            msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
+        if s_max is not None:
+            if valor > s_max:
+                if not portas_fechadas: # Só tenta fechar se ainda estiverem abertas
+                    origem, destino = 3, 2 # Fallback: se não houver histórico, fecha uma porta default importante
+                    
+                    if historico_corredores:
+                        # Encontra o corredor com mais tráfego
+                        (origem, destino) = max(historico_corredores, key=historico_corredores.get)
+                        
+                    msg = f"{{Type: CloseDoor, Player: {N_JOGADOR}, RoomOrigin: {origem}, RoomDestiny: {destino}}}"
+                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                    
+                    try:
+                        # Atualiza a BD para que, se houver crash, a informação de porta fechada sobreviva
+                        db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (origem, destino, id_simulacao_atual))
+                        db_conn.commit()
+                        portas_fechadas = True
+                        print(f"[ATUADOR SOM] Fechou corredor: {origem}->{destino}. Comando: {msg}")
+                    except Exception as e:
+                        print(f"[ERRO SQL] Falha ao fechar corredor: {e}")
+                        
+            else:
+                # O som está normal. Se havia portas fechadas, reabre-as.
+                if portas_fechadas:
+                    msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
+                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                    try:
+                        db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                        db_conn.commit()
+                        portas_fechadas = False
+                        historico_corredores.clear()
+                        print(f"[ATUADOR SOM] Nível normalizou. Comando: {msg}")
+                    except Exception as e:
+                        print(f"[ERRO SQL] Falha ao reabrir portas: {e}")
+
+def verificar_gatilho_marsamis(client, sala):
+    """ Latência Zero: Usa dicionário in-memory em vez de Query ao MySQL """
+    estado = ocupacao_memoria.get(sala)
+    if estado:
+        odd, even = estado['odd'], estado['even']
+        if odd == even and odd > 0:
+            msg = f"{{Type: Score, Player: {N_JOGADOR}, Room: {sala}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Som {valor}dB > Max ({s_max}dB). Comando: {msg}")
-
-def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
-    """
-    Verifica no MySQL se os Odd são iguais aos Even na sala atual.
-    """
-    try:
-        cursor.execute("SELECT NumeroMarsamisOdd, NumeroMarsamisEven FROM ocupacaolabirinto WHERE Sala = %s AND IDSimulacao = %s", (sala, id_simulacao))
-        resultado = cursor.fetchone()
-        
-        if resultado:
-            odd, even = resultado
-            if odd == even and odd > 0:
-                msg = f"{{Type: Score, Player: {N_JOGADOR}, Room: {sala}}}"
-                client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                print(f"[GATILHO SCORE] Sala {sala} - Igualdade (Odd:{odd}, Even:{even}). Comando: {msg}")
-    except Exception as e:
-        print(f"[ERRO GATILHO] Falha ao verificar sala {sala}: {e}")
-
+            print(f"[GATILHO SCORE] Igualdade Rápida em Memória (Odd:{odd}, Even:{even}). Comando: {msg}")
+            
 def carregar_limites_nuvem():
     global limites_termino
     try:
@@ -134,6 +177,13 @@ def procurar_simulacao_ativa():
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
             print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
+            db_cursor.execute("SELECT COUNT(*) FROM corredor WHERE Aberto = 0 AND IDSimulacao = %s", (id_simulacao_atual,))
+            res_portas = db_cursor.fetchone()
+            if res_portas and res_portas[0] > 0:
+                portas_fechadas = True
+                print("[RECUPERAÇÃO] O script reiniciou mas detetou portas fechadas na BD!")
+            else:
+                portas_fechadas = False
         else:
             print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
             id_simulacao_atual = None
@@ -169,39 +219,54 @@ def on_message(client, userdata, msg):
 
         if msg.topic == TOPIC_MOV:
             sucesso_bloco = True
-            salas_afetadas_neste_bloco = set() # <--- PASSO 3B: Iniciar o Set para guardar as salas
+            salas_para_verificar = set() 
             
             for mov in payload:
+                # 1. Filtro Temporal (Se for muito antiga, não vai para os atuadores)
+                is_recente = mensagem_recente(mov.get('Hour'))
+                
+                marsami_id = int(mov['Marsami'])
+                origem = mov['RoomOrigin']
+                destino = mov['RoomDestiny']
+                
+                # 2. Atualizar Dicionário de Memória e Histórico de Fluxo (Latência Zero)
+                if origem not in ocupacao_memoria: ocupacao_memoria[origem] = {'odd': 0, 'even': 0}
+                if destino not in ocupacao_memoria: ocupacao_memoria[destino] = {'odd': 0, 'even': 0}
+                
+                tipo_marsami = 'even' if marsami_id % 2 == 0 else 'odd'
+                
+                if origem != 0 and ocupacao_memoria[origem][tipo_marsami] > 0:
+                    ocupacao_memoria[origem][tipo_marsami] -= 1
+                if destino != 0:
+                    ocupacao_memoria[destino][tipo_marsami] += 1
+                    
+                    # Regista o uso do corredor para o gatilho de som saber qual fechar
+                    if origem != 0:
+                        corredor = (origem, destino)
+                        historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
+
+                # 3. Gravar na Base de Dados (Mesmo mensagens antigas são guardadas)
                 try:
                     db_cursor.callproc('SP_RegistarPassagem', [
                         id_simulacao_atual, mov['Marsami'], mov['RoomOrigin'],
                         mov['RoomDestiny'], mov['Status'], mov['_id']
                     ])
                     last_inserted_id = mov['_id']
-                    if mov['RoomDestiny'] != 0: # Ignora a sala 0
-                        salas_afetadas_neste_bloco.add(mov['RoomDestiny']) # <--- PASSO 3B: Guardar a sala de destino
+                    if destino != 0 and is_recente: 
+                        salas_para_verificar.add(destino)
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
                     sucesso_bloco = False
-                    break # Abandona o resto do bloco se der erro
+                    break 
 
             if sucesso_bloco:
-                db_conn.commit() # guarda tudo!
+                db_conn.commit() 
                 ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": "OK"}
                 client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
                 
-                # <--- PASSO 3B: Chamar a função de gatilho de pontuação para as salas afetadas
-                for sala in salas_afetadas_neste_bloco:
-                    verificar_gatilho_marsamis(client, sala, id_simulacao_atual, db_cursor)
-
-            else:
-                try:
-                    db_conn.commit() #tenta inserir o q ja tem
-                except:
-                    pass
-                print("[PC2] Bloco falhou a meio. Commit parcial efetuado.")
-                err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
-                client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
+                # Disparar gatilhos APENAS para os dados recentes!
+                for sala in salas_para_verificar:
+                    verificar_gatilho_marsamis(client, sala)
 
         elif msg.topic == TOPIC_PING:
             # ... (código do PING mantém-se inalterado) ...
@@ -266,8 +331,11 @@ def on_message(client, userdata, msg):
 
             db_conn.commit()
             
-            # <--- PASSO 3A: Disparar os atuadores físicos após o commit local
-            verificar_sensores_atuadores(client, sensor_type, val) 
+            # Aplicação do Filtro Temporal: Se vieram 300 logs de som após quebra, 
+            # não vai disparar atuadores com 1 hora de atraso
+            is_recente = mensagem_recente(hora_sensor)
+            if is_recente:
+                verificar_sensores_atuadores(client, sensor_type, val) 
 
     except Exception as e:
         print(f"[ERRO CRÍTICO] {e}")
