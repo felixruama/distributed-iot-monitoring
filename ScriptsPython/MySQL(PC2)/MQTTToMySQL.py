@@ -64,8 +64,8 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
     global portas_fechadas, historico_corredores, estado_ac
     
     if sensor_type == 'T':
-        t_max = limites_alerta['temp_max']
-        t_min = limites_alerta['temp_min']
+        t_max = limites_alerta['temp_max'] - 3
+        t_min = limites_alerta['temp_min'] + 3
         
         if t_max is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
@@ -80,7 +80,7 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
             print("[ATUADOR] Ar Condicionado DESLIGADO")
             
     elif sensor_type == 'S':
-        s_max = limites_alerta['som_max']
+        s_max = limites_alerta['som_max'] - 3
         if s_max is not None:
             if valor > s_max:
                 # O som está alto! Vamos fechar portas de forma PROGRESSIVA.
