@@ -325,7 +325,7 @@ def on_message(client, userdata, msg):
                 db_cursor.execute("UPDATE simulacao SET motivo_fim = IFNULL(motivo_fim, %s) WHERE IDSimulacao = %s", (motivo, id_simulacao_atual))
                 if not jadeuprint:
 
-                    print(f"[FIM SIMULAÇÃO] Limite absoluto excedido ({val}).")
+                    print(f"[FIM SIMULAÇÃO] Motivo: {motivo} Valor: {val}.")
                     jadeuprint=True
 
 
