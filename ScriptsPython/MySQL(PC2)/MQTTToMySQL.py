@@ -34,7 +34,7 @@ db_conn = None
 db_cursor = None
 id_simulacao_atual = None
 motivo = None
-jadeuprint=False
+jadeuprint = False
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
@@ -45,6 +45,7 @@ historico_corredores = {}
 portas_fechadas = False
 estado_ac = None # NOVO: Guarda o estado do AC para evitar spam
 DELTA_MAXIMO = 5
+margemAlerta = 5
 
 # ==========================================
 # FUNÇÕES DE ATUADORES / GATILHOS
@@ -63,13 +64,10 @@ def mensagem_recente(hora_str):
         return False
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
-    global portas_fechadas, historico_corredores, estado_ac
-    
-    # A tua ideia de usar margem de 5 para agir mais cedo
-    margem = 5 
+    global portas_fechadas, historico_corredores, estado_ac, margemAlerta
     
     if sensor_type == 'T':
-        t_max = limites_alerta['temp_max'] - margem
+        t_max = limites_alerta['temp_max'] - margemAlerta
         
         if limites_alerta['temp_max'] is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
@@ -86,42 +84,25 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
             
     elif sensor_type == 'S':
         if limites_alerta['som_max'] is not None:
-            s_max = limites_alerta['som_max'] - margem
+            s_max = limites_alerta['som_max'] - margemAlerta
             if valor > s_max:
-                # O som está alto! Vamos fechar portas de forma PROGRESSIVA.
-                origem, destino = None, None
-                
-                # 1. Procurar o corredor mais usado que AINDA ESTEJA ABERTO
-                for corredor in sorted(historico_corredores, key=historico_corredores.get, reverse=True):
-                    db_cursor.execute("SELECT Aberto FROM corredor WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (corredor[0], corredor[1], id_simulacao_atual))
-                    res = db_cursor.fetchone()
-                    if res and res[0] == 1: 
-                        origem, destino = corredor
-                        break
-                
-                # 2. Se não houver histórico, tenta fechar qualquer um que esteja aberto (Fallback)
-                if origem is None:
-                    db_cursor.execute("SELECT IDSalaA, IDSalaB FROM corredor WHERE Aberto = 1 AND IDSimulacao = %s LIMIT 1", (id_simulacao_atual,))
-                    res_fallback = db_cursor.fetchone()
-                    if res_fallback:
-                        origem, destino = res_fallback[0], res_fallback[1]
-                
-                # 3. Disparar!
-                if origem is not None and destino is not None:
-                    try:
-                        db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (origem, destino, id_simulacao_atual))
-                        db_conn.commit()
-                        portas_fechadas = True 
-                        
-                        msg = f"{{Type: CloseDoor, Player: {N_JOGADOR}, RoomOrigin: {origem}, RoomDestiny: {destino}}}"
-                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                        print(f"[ATUADOR SOM] Fechou corredor: {origem}->{destino}. Nível: {valor}dB. Comando: {msg}")
-                    except Exception as e:
-                        print(f"[ERRO SQL] Falha ao fechar porta progressiva: {e}")
-                else:
-                    print(f"[ATUADOR SOM] O som continua alto ({valor}dB), mas o labirinto já está totalmente trancado!")
+                # O som está alto! MODO EXTREMO: Usar o comando global para forçar o simulador a baixar o som!
+                try:
+                    # 1. Tranca na Base de Dados LOCAL (para o teu script saber que fechou tudo)
+                    db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                    db_conn.commit()
+                    portas_fechadas = True 
+                    
+                    # 2. Dispara o super-comando MQTT que o mazerun exige!
+                    msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
+                    client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                    
+                    print(f"[ATUADOR SOM] MODO EXTREMO ATIVADO! Comando CloseAllDoor enviado. Nível: {valor}dB.")
+                except Exception as e:
+                    print(f"[ERRO SQL] Falha ao fechar todas as portas: {e}")
                         
             else:
+                # O som normalizou! Vamos reabrir as portas todas.
                 if portas_fechadas:
                     try:
                         db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
