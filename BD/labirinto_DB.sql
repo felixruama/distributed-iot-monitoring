@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 15, 2026 at 03:34 PM
+-- Generation Time: May 15, 2026 at 11:09 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -138,6 +138,7 @@ ELSEIF p_Tipo = 'Migrador' THEN
             SET @qry = CONCAT('GRANT SELECT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.som TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.temperatura TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT INSERT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT, UPDATE ON ', @db, '.corredor TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT, UPDATE ON ', @db, '.marsami TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.medicoespassagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
@@ -146,7 +147,6 @@ SET @qry = CONCAT('GRANT SELECT ON ', @db, '.simulacao TO ', @usr); PREPARE s FR
 
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_RegistarPassagem TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_RegistarAlerta TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
-SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_TerminarSimulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 END IF;
 
 DEALLOCATE PREPARE s;
