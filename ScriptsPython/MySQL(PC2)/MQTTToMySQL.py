@@ -4,6 +4,7 @@ import mysql.connector
 import paho.mqtt.client as mqtt
 import argparse # Importado para ler argumentos da consola
 from datetime import datetime
+import time
 
 parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
@@ -27,6 +28,7 @@ TOPIC_ACK = f"pisid_response_{N_JOGADOR}"
 TOPIC_PING = f"pisid_didyougetit_{N_JOGADOR}"
 TOPIC_RESEND = f"pisid_resend_{N_JOGADOR}"
 TOPIC_ACTUATORS = "pisid_mazeact"
+TOPIC_CONFIG = f"pisid_config_{N_JOGADOR}"
 
 # Estado Global
 last_inserted_id = None
@@ -133,25 +135,39 @@ def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
             
 def carregar_limites_nuvem():
     global limites_termino
-    try:
-        print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
-        nuvem_conn = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
-        cursor = nuvem_conn.cursor(dictionary=True)
-        cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
-        resultado = cursor.fetchone()
+    while True: # fica em loop ate conseguir os dados da nuvem
+        try:
+            print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
+            nuvem_conn = mysql.connector.connect(
+                host="194.210.86.10",
+                user="aluno",
+                password="aluno",
+                database="maze",
+                connect_timeout=5
+            )
+            cursor = nuvem_conn.cursor(dictionary=True)
+            cursor.execute("SELECT normaltemperature, temperaturevarhightoleration, temperaturevarlowtoleration, normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
+            resultado = cursor.fetchone()
 
-        if resultado:
-            t_normal = float(resultado['normaltemperature'])
-            s_normal = float(resultado['normalnoise'])
-            limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
-            limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
-            limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
-            print(f"[NUVEM] Limites de FIM DE JOGO: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
+            if resultado:
+                t_normal = float(resultado['normaltemperature'])
+                s_normal = float(resultado['normalnoise'])
+                limites_termino['temp_max'] = t_normal + float(resultado['temperaturevarhightoleration'])
+                limites_termino['temp_min'] = t_normal - float(resultado['temperaturevarlowtoleration'])
+                limites_termino['som_max'] = s_normal + float(resultado['noisevartoleration'])
 
-        cursor.close()
-        nuvem_conn.close()
-    except Exception as e:
-        print(f"[ERRO NUVEM] Falha ao carregar limites de término: {e}")
+                print(f"[NUVEM] Limites de FIM DE JOGO obtidos: Temp({limites_termino['temp_min']} a {limites_termino['temp_max']}), Som(Max {limites_termino['som_max']})")
+
+                cursor.close()
+                nuvem_conn.close()
+                break # deixa o script continuar
+            else:
+                print("[NUVEM] Dados incompletos na base de dados remota.")
+
+        except Exception as e:
+            print(f"[ERRO NUVEM] Falha ao carregar limites: {e}. A tentar de novo em 5 segundos...")
+
+        time.sleep(5) #espera antes de voltar a tentar
 
 def manter_conexao_viva():
     global db_conn, db_cursor
@@ -212,7 +228,11 @@ def procurar_simulacao_ativa():
                 historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
             print(f"[BULLETPROOF] Recuperado: Histórico de tráfego reconstruído a partir dos últimos {len(res_movimentos)} movimentos.")
             # ==========================================================
-
+            periodicidade_bd = resultado[4]
+            if periodicidade_bd is not None:
+                config_payload = {"Periodicidade": periodicidade_bd}
+                mqtt_client.publish(TOPIC_CONFIG, json.dumps(config_payload), qos=2)
+                print(f"[CONFIG] Periodicidade ({periodicidade_bd}s) enviada para o PC1!")
         else:
             print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
             id_simulacao_atual = None
