@@ -56,17 +56,9 @@ def mensagem_recente(hora_str):
         # Tenta interpretar a string da hora da mensagem
         msg_time = datetime.strptime(hora_str, "%Y-%m-%d %H:%M:%S")
         delta = (datetime.now() - msg_time).total_seconds()
-        
-        # Aumentei para 120 segundos (2 mins) temporariamente para apanhar dessincronizações de relógio
-        if abs(delta) > 120:
-            # ESTE PRINT VAI DENUNCIAR SE OS RELÓGIOS DOS PCs ESTIVEREM DESFASADOS!
-            print(f"[FILTRO TEMPO] Mensagem bloqueada! Atraso enorme: {delta:.1f} segundos.")
-            return False
-            
+        return abs(delta) <= DELTA_MAXIMO
+    except:
         return True
-    except Exception as e:
-        print(f"[FILTRO TEMPO] Erro de formatação na hora ({hora_str}): {e}")
-        return True # Fallback
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
     global portas_fechadas, historico_corredores, estado_ac
