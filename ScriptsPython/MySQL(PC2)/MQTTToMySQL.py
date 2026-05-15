@@ -44,7 +44,7 @@ ocupacao_memoria = {}
 historico_corredores = {}
 portas_fechadas = False
 estado_ac = None # NOVO: Guarda o estado do AC para evitar spam
-DELTA_MAXIMO = 15 # AUMENTADO: 5 segundos é muito apertado se houver lag na rede
+DELTA_MAXIMO = 5
 
 # ==========================================
 # FUNÇÕES DE ATUADORES / GATILHOS
@@ -56,9 +56,17 @@ def mensagem_recente(hora_str):
         # Tenta interpretar a string da hora da mensagem
         msg_time = datetime.strptime(hora_str, "%Y-%m-%d %H:%M:%S")
         delta = (datetime.now() - msg_time).total_seconds()
-        return abs(delta) <= DELTA_MAXIMO
-    except:
-        return True # Fallback caso a formatação de hora falhe
+        
+        # Aumentei para 120 segundos (2 mins) temporariamente para apanhar dessincronizações de relógio
+        if abs(delta) > 120:
+            # ESTE PRINT VAI DENUNCIAR SE OS RELÓGIOS DOS PCs ESTIVEREM DESFASADOS!
+            print(f"[FILTRO TEMPO] Mensagem bloqueada! Atraso enorme: {delta:.1f} segundos.")
+            return False
+            
+        return True
+    except Exception as e:
+        print(f"[FILTRO TEMPO] Erro de formatação na hora ({hora_str}): {e}")
+        return True # Fallback
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
     global portas_fechadas, historico_corredores, estado_ac
@@ -67,14 +75,12 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
         t_max = limites_alerta['temp_max']
         t_min = limites_alerta['temp_min']
         
-        # Só liga se ainda não estiver ligado (evita spam)
         if t_max is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
             estado_ac = 'ON'
-            print("[ATUADOR] Ar Condicionado LIGADO")
+            print("[ATUADOR] Ar Condicionado LIGADO (Ficará calado até a temp descer)")
             
-        # Só desliga se ainda não estiver desligado (evita spam)
         elif t_min is not None and valor < t_min and estado_ac != 'OFF':
             msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
@@ -85,44 +91,58 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
         s_max = limites_alerta['som_max']
         if s_max is not None:
             if valor > s_max:
-                if not portas_fechadas: # Só tenta fechar se ainda estiverem abertas
-                    origem, destino = 3, 2 # Fallback: se não houver histórico, fecha uma porta default importante
-                    
-                    if historico_corredores:
-                        # Encontra o corredor com mais tráfego
-                        (origem, destino) = max(historico_corredores, key=historico_corredores.get)
-                        
+                # O som está alto! Vamos fechar portas de forma PROGRESSIVA.
+                origem, destino = None, None
+                
+                # 1. Procurar o corredor mais usado que AINDA ESTEJA ABERTO
+                # Ordena o histórico de tráfego do mais usado para o menos usado
+                for corredor in sorted(historico_corredores, key=historico_corredores.get, reverse=True):
+                    db_cursor.execute("SELECT Aberto FROM corredor WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (corredor[0], corredor[1], id_simulacao_atual))
+                    res = db_cursor.fetchone()
+                    if res and res[0] == 1: # Encontrámos um que ainda está aberto!
+                        origem, destino = corredor
+                        break
+                
+                # 2. Se o histórico estiver vazio ou já fechámos tudo o que lá estava, apanha qualquer corredor aberto na BD
+                if origem is None:
+                    db_cursor.execute("SELECT IDSalaA, IDSalaB FROM corredor WHERE Aberto = 1 AND IDSimulacao = %s LIMIT 1", (id_simulacao_atual,))
+                    res_fallback = db_cursor.fetchone()
+                    if res_fallback:
+                        origem, destino = res_fallback[0], res_fallback[1]
+                
+                # 3. Se encontrámos um corredor para fechar, disparamos!
+                if origem is not None and destino is not None:
                     try:
-                        # 1. PRIMEIRO: Garantimos a memória! (Regista na BD)
+                        # Regista na BD que esta porta específica fechou
                         db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSalaA = %s AND IDSalaB = %s AND IDSimulacao = %s", (origem, destino, id_simulacao_atual))
                         db_conn.commit()
-                        portas_fechadas = True
                         
-                        # 2. DEPOIS: Dispara o atuador para o jogo!
+                        portas_fechadas = True # Avisa o sistema que temos (pelo menos) uma porta trancada
+                        
+                        # Dispara o atuador
                         msg = f"{{Type: CloseDoor, Player: {N_JOGADOR}, RoomOrigin: {origem}, RoomDestiny: {destino}}}"
                         client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                        print(f"[ATUADOR SOM] Fechou corredor: {origem}->{destino}. Comando: {msg}")
-                        
+                        print(f"[ATUADOR SOM] Fechou corredor: {origem}->{destino}. Nível: {valor}dB. Comando: {msg}")
                     except Exception as e:
-                        print(f"[ERRO SQL] Falha ao fechar corredor na BD. O atuador NÃO foi disparado por segurança: {e}")
+                        print(f"[ERRO SQL] Falha ao fechar porta progressiva: {e}")
+                else:
+                    print(f"[ATUADOR SOM] O som continua alto ({valor}dB), mas o labirinto já está totalmente trancado!")
                         
             else:
-                # O som está normal. Se havia portas fechadas, reabre-as.
+                # O som normalizou abaixo do limite! Reabrimos todas as portas que tínhamos fechado.
                 if portas_fechadas:
                     try:
-                        # 1. PRIMEIRO: Atualiza a memória na BD!
                         db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
                         db_conn.commit()
-                        portas_fechadas = False
-                        historico_corredores.clear()
                         
-                        # 2. DEPOIS: Dispara o atuador físico
+                        portas_fechadas = False
+                        historico_corredores.clear() # Limpamos a memória de tráfego para a próxima crise
+                        
                         msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
                         client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                        print(f"[ATUADOR SOM] Nível normalizou. Comando: {msg}")
-                        
+                        print(f"[ATUADOR SOM] Nível normalizou ({valor}dB). Todas as portas reabertas. Comando: {msg}")
                     except Exception as e:
-                        print(f"[ERRO SQL] Falha ao reabrir portas na BD. Atuador NÃO disparado: {e}")
+                        print(f"[ERRO SQL] Falha ao reabrir portas: {e}")
 
 def verificar_gatilho_marsamis(client, sala):
     """ Latência Zero: Usa dicionário in-memory em vez de Query ao MySQL """
