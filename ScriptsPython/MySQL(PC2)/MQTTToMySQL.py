@@ -164,6 +164,8 @@ def manter_conexao_viva():
 
 def procurar_simulacao_ativa():
     global id_simulacao_atual, limites_alerta, jadeuprint
+    global portas_fechadas, ocupacao_memoria, historico_corredores # Assegurar as globais
+    
     if not manter_conexao_viva(): return
     try:
         db_conn.commit()
@@ -172,23 +174,56 @@ def procurar_simulacao_ativa():
 
         if resultado:
             id_simulacao_atual = resultado[0]
-            jadeuprint=False
+            jadeuprint = False
             limites_alerta['temp_max'] = float(resultado[1]) if resultado[1] else None
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
             print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
+            
+            # ==========================================================
+            # 🛡️ RECUPERAÇÃO DE DESASTRE (BULLETPROOF BOOT)
+            # ==========================================================
+            
+            # 1. Recuperar o estado das Portas
             db_cursor.execute("SELECT COUNT(*) FROM corredor WHERE Aberto = 0 AND IDSimulacao = %s", (id_simulacao_atual,))
             res_portas = db_cursor.fetchone()
             if res_portas and res_portas[0] > 0:
                 portas_fechadas = True
-                print("[RECUPERAÇÃO] O script reiniciou mas detetou portas fechadas na BD!")
+                print("[BULLETPROOF] Recuperado: Existem portas fechadas nesta simulação.")
             else:
                 portas_fechadas = False
+
+            # 2. Recuperar a Memória de Ocupação dos Marsamis (Para o gatilho Score)
+            db_cursor.execute("SELECT Sala, NumeroMarsamisOdd, NumeroMarsamisEven FROM ocupacaolabirinto WHERE IDSimulacao = %s", (id_simulacao_atual,))
+            res_ocupacao = db_cursor.fetchall()
+            ocupacao_memoria.clear() 
+            for row in res_ocupacao:
+                sala, odd, even = row[0], row[1], row[2]
+                ocupacao_memoria[sala] = {'odd': odd, 'even': even}
+            print(f"[BULLETPROOF] Recuperado: Posição de Marsamis reconstruída para {len(ocupacao_memoria)} salas.")
+
+            # 3. A TUA IDEIA: Recuperar o Histórico de Corredores (Mapa de Tráfego para o Som)
+            # Vamos buscar os últimos 30 movimentos válidos (que não sejam 0 -> 0) para saber onde anda o barulho
+            db_cursor.execute("""
+                SELECT SalaOrigem, SalaDestino 
+                FROM medicoespassagens 
+                WHERE IDSimulacao = %s AND SalaOrigem != 0 AND SalaDestino != 0 
+                ORDER BY IDMedicao DESC LIMIT 30
+            """, (id_simulacao_atual,))
+            res_movimentos = db_cursor.fetchall()
+            historico_corredores.clear()
+            for row in res_movimentos:
+                origem, destino = row[0], row[1]
+                corredor = (origem, destino)
+                historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
+            print(f"[BULLETPROOF] Recuperado: Histórico de tráfego reconstruído a partir dos últimos {len(res_movimentos)} movimentos.")
+            # ==========================================================
+
         else:
             print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
             id_simulacao_atual = None
     except Exception as e:
-        print(f"[ERRO] Falha ao procurar simulação: {e}")
+        print(f"[ERRO] Falha ao procurar simulação e reconstruir dados: {e}")
 
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC2 Ligado (Código: {rc})")
