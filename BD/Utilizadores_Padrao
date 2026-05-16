@@ -1,3 +1,24 @@
+-- Limpar todos os utilizadores criados para os testes
+DROP USER IF EXISTS 'android@lab.pt'@'%';
+DROP USER IF EXISTS 'equipa@lab.pt'@'%';
+DROP USER IF EXISTS 'migrador@lab.pt'@'%';
+DROP USER IF EXISTS 'outrouser@lab.pt'@'%';
+DROP USER IF EXISTS 'outraequipa@lab.pt'@'%';
+DROP USER IF EXISTS 'admin@lab.pt'@'%';
+
+-- Aplicar as alterações
+FLUSH PRIVILEGES;
+
+DELETE FROM utilizador 
+WHERE Email IN (
+    'android@lab.pt',
+    'equipa@lab.pt',
+    'migrador@lab.pt',
+    'outrouser@lab.pt',
+    'outraequipa@lab.pt',
+    'admin@lab.pt'
+);
+
 -- 1. Criar o utilizador para a App Android (Tipo: 'Monitor Android')
 CALL SP_CriarUtilizador(
     'App Android',
