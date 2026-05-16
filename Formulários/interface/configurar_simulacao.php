@@ -22,6 +22,7 @@ if ($dados['Criador'] != $_SESSION['IDUtilizador']) {
 }
 
 include('includes/header.php');
+require_once('../php/get_limites_nuvem.php');
 ?>
 
 <div class="container">
@@ -37,39 +38,51 @@ include('includes/header.php');
         <form action="../php/processar_configuracao.php" method="POST">
             <input type="hidden" name="id_simulacao" value="<?php echo $id_simulacao; ?>">
 
+            <?php if($ruido_critico_nuvem !== ""): ?>
+            <div style="background-color: #e9ecef; border-left: 4px solid #17a2b8; padding: 10px; margin-bottom: 20px; border-radius: 4px; font-size: 0.9em; color: #495057;">
+                <strong><i class="fas fa-info-circle"></i> Limites Críticos do Labirinto:</strong><br>
+                <span style="margin-left: 20px;">
+                    🌡️ <strong>Temperatura:</strong> Mínima: <?php echo $temp_min_critica_nuvem; ?> °C | Máxima: <?php echo $temp_max_critica_nuvem; ?> °C
+                </span><br>
+                <span style="margin-left: 20px;">
+                    🔊 <strong>Ruído:</strong> Máximo: <?php echo $ruido_critico_nuvem; ?> dB
+                </span>
+            </div>
+            <?php endif; ?>
+
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div class="form-group-alt">
-                    <label>Temp. Mínima (°C)</label>
+                    <label>Temp. Mínima Alertas (°C)</label>
                     <div class="input-pill">
-                        <input type="number" name="temp_min" step="0.1" value="<?php echo htmlspecialchars($dados['TempMin'] ?? ''); ?>" required>
+                        <input type="number" name="temp_min" step="0.1" value="<?php echo htmlspecialchars($dados['TempMin'] ?? ''); ?>" min="<?php echo $temp_min_critica_nuvem; ?>" required>
                         <i class="fas fa-thermometer-empty"></i>
                     </div>
                 </div>
                 <div class="form-group-alt">
-                    <label>Temp. Máxima (°C)</label>
+                    <label>Temp. Máxima Alertas (°C)</label>
                     <div class="input-pill">
-                        <input type="number" name="temp_max" step="0.1" value="<?php echo htmlspecialchars($dados['TempMax'] ?? ''); ?>" required>
+                        <input type="number" name="temp_max" step="0.1" value="<?php echo htmlspecialchars($dados['TempMax'] ?? ''); ?>" max="<?php echo $temp_max_critica_nuvem; ?>" required>
                         <i class="fas fa-thermometer-full"></i>
                     </div>
                 </div>
                 <div class="form-group-alt">
-                    <label>Ruído Máximo (dB)</label>
+                    <label>Ruído Máximo Alertas (dB)</label>
                     <div class="input-pill">
-                        <input type="number" name="ruido_max" step="0.1" value="<?php echo htmlspecialchars($dados['RuidoMax'] ?? ''); ?>" required>
+                        <input type="number" name="ruido_max" step="0.1" value="<?php echo htmlspecialchars($dados['RuidoMax'] ?? ''); ?>" max="<?php echo $ruido_critico_nuvem; ?>" required>
                         <i class="fas fa-volume-up"></i>
                     </div>
                 </div>
                 <div class="form-group-alt">
                     <label>Periodicidade (s)</label>
                     <div class="input-pill">
-                        <input type="number" name="periodicidade" value="<?php echo htmlspecialchars($dados['Periodicidade'] ?? ''); ?>" required>
+                        <input type="number" name="periodicidade" value="<?php echo htmlspecialchars($dados['Periodicidade'] ?? ''); ?>" min="1" required>
                         <i class="fas fa-clock"></i>
                     </div>
                 </div>
                 <div class="form-group-alt" style="grid-column: span 2;">
                     <label>Intervalo entre Alertas (s)</label>
                     <div class="input-pill">
-                        <input type="number" name="intervalo" value="<?php echo htmlspecialchars($dados['IntervaloAlertas'] ?? ''); ?>" required>
+                        <input type="number" name="intervalo" value="<?php echo htmlspecialchars($dados['IntervaloAlertas'] ?? ''); ?>" min="1" required>
                         <i class="fas fa-bell"></i>
                     </div>
                 </div>

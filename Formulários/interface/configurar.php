@@ -50,9 +50,9 @@ include('includes/header.php');
             </div>
 
             <h3>Limites do Sistema</h3>
-            <div class="info-item"><label>Temp. Mínima:</label> <span>10°C</span></div>
-            <div class="info-item"><label>Temp. Máxima:</label> <span>60°C</span></div>
-            <div class="info-item"><label>Ruído Máximo:</label> <span>80 dB</span></div>
+            <div class="info-item"><label>Temp. Mínima Alerta:</label> <span>10°C</span></div>
+            <div class="info-item"><label>Temp. Máxima Alerta:</label> <span>60°C</span></div>
+            <div class="info-item"><label>Ruído Máximo Alerta:</label> <span>80 dB</span></div>
         </aside>
 
         <!-- DIREITA: Formulário -->
@@ -66,7 +66,7 @@ include('includes/header.php');
 
                 <div class="form-row-grid">
                     <div class="form-group-alt">
-                        <label>Temperatura Mínima Alerta</label>
+                        <label>Temperatura Mínima Alertas</label>
                         <div class="input-pill">
                             <input type="number" step="0.1" name="temp_min"
                                    value="<?php echo $dados['TempMinAlerta']; ?>"
@@ -75,7 +75,7 @@ include('includes/header.php');
                         </div>
                     </div>
                     <div class="form-group-alt">
-                        <label>Temperatura Máxima Alerta</label>
+                        <label>Temperatura Máxima Alertas</label>
                         <div class="input-pill">
                             <input type="number" step="0.1" name="temp_max"
                                    value="<?php echo $dados['TempMaxAlerta']; ?>"
@@ -87,7 +87,7 @@ include('includes/header.php');
 
                 <div class="form-row-grid" style="grid-template-columns: 1fr;">
                     <div class="form-group-alt">
-                        <label>Ruído Crítico (dB)</label>
+                        <label>Ruído Máximo Alertas (dB)</label>
                         <div class="input-pill">
                             <input type="number" step="0.1" name="ruido"
                                    value="<?php echo $dados['RuidoMaxAlerta']; ?>"
