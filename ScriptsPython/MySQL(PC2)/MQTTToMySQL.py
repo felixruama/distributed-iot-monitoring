@@ -3,6 +3,7 @@ import json
 import mysql.connector
 import paho.mqtt.client as mqtt
 import argparse # Importado para ler argumentos da consola
+from datetime import datetime
 import time
 
 parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
@@ -34,46 +35,106 @@ last_inserted_id = None
 db_conn = None
 db_cursor = None
 id_simulacao_atual = None
-motivo=None
-jadeuprint=False
+motivo = None
+jadeuprint = False
 
 limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
 
-# ==========================================
-# FUNÇÕES DE ATUADORES / GATILHOS
-# ==========================================
+# --- VARIÁVEIS DE ATUADORES ---
+ocupacao_memoria = {}
+historico_corredores = {}
+portas_fechadas = False
+estado_ac = None
+DELTA_MAXIMO = 5
+margemAlertaSom = 5
+margemAlertaTemp = 5
+
+def mensagem_recente(hora_str):
+    """ Filtro Temporal Delta (Tolerância a Falhas) """
+    if not hora_str: return True # Movimentos passam sempre para calcular o Score!
+    try:
+        # Cortar os microsegundos que o Mazerun envia para não dar erro
+        hora_limpa = hora_str.split('.')[0]
+        msg_time = datetime.strptime(hora_limpa, "%Y-%m-%d %H:%M:%S")
+        delta = (datetime.now() - msg_time).total_seconds()
+        return abs(delta) <= DELTA_MAXIMO
+    except:
+        return False
 
 def verificar_sensores_atuadores(client, sensor_type, valor):
-    """
-    Compara o valor lido com os limites de alerta guardados em memória.
-    Dispara os atuadores correspondentes para a nuvem do professor.
-    """
+    global portas_fechadas, historico_corredores, estado_ac, margemAlertaSom, margemAlertaTemp
+    
     if sensor_type == 'T':
-        t_max = limites_alerta['temp_max']
-        t_min = limites_alerta['temp_min']
-        
-        if t_max is not None and valor > t_max:
+        t_max = limites_alerta['temp_max'] - margemAlertaTemp
+        t_min = limites_alerta['temp_min'] + margemAlertaTemp
+
+        # 1. Está muito calor -> LIGA O AC
+        if limites_alerta['temp_max'] is not None and valor > t_max and estado_ac != 'ON':
             msg = f"{{Type: AcOn, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Temp {valor}ºC > Max ({t_max}ºC). Comando: {msg}")
+            estado_ac = 'ON'
+            print(f"[ATUADOR] Ar Condicionado LIGADO (Ativado aos {valor}ºC)")
             
-        elif t_min is not None and valor < t_min:
+        # 2. A temperatura já desceu para um valor seguro (ex: 2 graus abaixo do t_max) -> DESLIGA O AC
+        elif limites_alerta['temp_max'] is not None and valor <= (t_max - 2) and estado_ac == 'ON':
             msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Temp {valor}ºC < Min ({t_min}ºC). Comando: {msg}")
+            estado_ac = 'OFF'
+            print(f"[ATUADOR] Ar Condicionado DESLIGADO (Temperatura normalizou para {valor}ºC)")
+
+        # 3. Proteção Contra Frio Extremo: O labirinto está a congelar naturalmente -> GARANTE AC DESLIGADO
+        elif limites_alerta['temp_min'] is not None and valor < t_min and estado_ac != 'OFF':
+            msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
+            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+            estado_ac = 'OFF'
+            print(f"[ATUADOR] Ar Condicionado DESLIGADO por segurança (Muito frio: {valor}ºC)")
             
     elif sensor_type == 'S':
-        s_max = limites_alerta['som_max']
-        if s_max is not None and valor > s_max:
-            msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
-            client.publish(TOPIC_ACTUATORS, msg, qos=1)
-            print(f"[ATUADOR] Som {valor}dB > Max ({s_max}dB). Comando: {msg}")
-
+        if limites_alerta['som_max'] is not None:
+            s_max = limites_alerta['som_max'] - margemAlertaSom
+            if valor > s_max:
+                # O som está alto! MODO EXTREMO
+                if not portas_fechadas:
+                    try:
+                        # 1. Tranca na Base de Dados LOCAL
+                        db_cursor.execute("UPDATE corredor SET Aberto = 0 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                        db_conn.commit()
+                        portas_fechadas = True 
+                        
+                        # 2. Dispara o super-comando MQTT
+                        msg = f"{{Type: CloseAllDoor, Player: {N_JOGADOR}}}"
+                        client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                        
+                        print(f"[ATUADOR SOM] Nível de som crítico ({valor}dB). Todas as portas fechadas.")
+                    except Exception as e:
+                        print(f"[ERRO SQL] Falha ao fechar todas as portas: {e}")
+                        
+            else:
+                # O som normalizou!
+                if portas_fechadas:
+                    try:
+                        # Verifica se a simulação já terminou (Estado = '2')
+                        db_cursor.execute("SELECT Estado FROM simulacao WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                        res_estado = db_cursor.fetchone()
+                        
+                        if res_estado and res_estado[0] == '2':
+                            print("[ATUADOR SOM] Simulação já terminou! As portas vão permanecer seladas.")
+                            portas_fechadas = False 
+                        else:
+                            db_cursor.execute("UPDATE corredor SET Aberto = 1 WHERE IDSimulacao = %s", (id_simulacao_atual,))
+                            db_conn.commit()
+                            portas_fechadas = False
+                            historico_corredores.clear()
+                            
+                            msg = f"{{Type: OpenAllDoor, Player: {N_JOGADOR}}}"
+                            client.publish(TOPIC_ACTUATORS, msg, qos=1)
+                            print(f"[ATUADOR SOM] Nível normalizou ({valor}dB). Todas as portas reabertas.")
+                            
+                    except Exception as e:
+                        print(f"[ERRO SQL] Falha ao reabrir portas: {e}")
+                        
 def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
-    """
-    Verifica no MySQL se os Odd são iguais aos Even na sala atual.
-    """
     try:
         cursor.execute("SELECT NumeroMarsamisOdd, NumeroMarsamisEven FROM ocupacaolabirinto WHERE Sala = %s AND IDSimulacao = %s", (sala, id_simulacao))
         resultado = cursor.fetchone()
@@ -83,13 +144,13 @@ def verificar_gatilho_marsamis(client, sala, id_simulacao, cursor):
             if odd == even and odd > 0:
                 msg = f"{{Type: Score, Player: {N_JOGADOR}, Room: {sala}}}"
                 client.publish(TOPIC_ACTUATORS, msg, qos=1)
-                print(f"[GATILHO SCORE] Sala {sala} - Igualdade (Odd:{odd}, Even:{even}). Comando: {msg}")
+                print(f"[GATILHO SCORE] Sala {sala} - Igualdade confirmada pela BD (Odd:{odd}, Even:{even}). Comando: {msg}")
     except Exception as e:
         print(f"[ERRO GATILHO] Falha ao verificar sala {sala}: {e}")
-
+            
 def carregar_limites_nuvem():
     global limites_termino
-    while True: # fica em loop ate conseguir os dados da nuvem
+    while True:
         try:
             print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
             nuvem_conn = mysql.connector.connect(
@@ -121,7 +182,7 @@ def carregar_limites_nuvem():
         except Exception as e:
             print(f"[ERRO NUVEM] Falha ao carregar limites: {e}. A tentar de novo em 5 segundos...")
 
-        time.sleep(5) #espera antes de voltar a tentar
+        time.sleep(5)
 
 def manter_conexao_viva():
     global db_conn, db_cursor
@@ -137,6 +198,8 @@ def manter_conexao_viva():
 
 def procurar_simulacao_ativa():
     global id_simulacao_atual, limites_alerta, jadeuprint
+    global portas_fechadas, ocupacao_memoria, historico_corredores # Assegurar as globais
+    
     if not manter_conexao_viva(): return
     try:
         db_conn.commit()
@@ -145,11 +208,31 @@ def procurar_simulacao_ativa():
 
         if resultado:
             id_simulacao_atual = resultado[0]
-            jadeuprint=False
+            jadeuprint = False
             limites_alerta['temp_max'] = float(resultado[1]) if resultado[1] else None
             limites_alerta['temp_min'] = float(resultado[2]) if resultado[2] else None
             limites_alerta['som_max'] = float(resultado[3]) if resultado[3] else None
             print(f"[INIT LOCAL] Simulação ativa: ID {id_simulacao_atual}. Limites de ALERTA carregados.")
+            db_cursor.execute("SELECT COUNT(*) FROM corredor WHERE Aberto = 0 AND IDSimulacao = %s", (id_simulacao_atual,))
+            res_portas = db_cursor.fetchone()
+            if res_portas and res_portas[0] > 0:
+                portas_fechadas = True
+                print("[BULLETPROOF] Recuperado: Existem portas fechadas nesta simulação.")
+            else:
+                portas_fechadas = False
+            db_cursor.execute("""
+                SELECT SalaOrigem, SalaDestino 
+                FROM medicoespassagens 
+                WHERE IDSimulacao = %s AND SalaOrigem != 0 AND SalaDestino != 0 
+                ORDER BY IDMedicao DESC LIMIT 30
+            """, (id_simulacao_atual,))
+            res_movimentos = db_cursor.fetchall()
+            historico_corredores.clear()
+            for row in res_movimentos:
+                origem, destino = row[0], row[1]
+                corredor = (origem, destino)
+                historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
+            print(f"[BULLETPROOF] Recuperado: Histórico de tráfego reconstruído a partir dos últimos {len(res_movimentos)} movimentos.")
             periodicidade_bd = resultado[4]
             if periodicidade_bd is not None:
                 config_payload = {"Periodicidade": periodicidade_bd}
@@ -159,13 +242,12 @@ def procurar_simulacao_ativa():
             print("[AVISO] Nenhuma simulação ativa (Estado=1) encontrada na BD.")
             id_simulacao_atual = None
     except Exception as e:
-        print(f"[ERRO] Falha ao procurar simulação: {e}")
+        print(f"[ERRO] Falha ao procurar simulação e reconstruir dados: {e}")
 
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] PC2 Ligado (Código: {rc})")
     client.subscribe([(TOPIC_MOV, 2), (TOPIC_TEMP, 0), (TOPIC_SOM, 0), (TOPIC_PING, 2)])
 
-    # --- ESTRATÉGIA GENIAL: Ao ligar/reiniciar, grita para a rede o último ID que tem guardado ---
     if id_simulacao_atual is not None and manter_conexao_viva():
         try:
             db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
@@ -190,42 +272,42 @@ def on_message(client, userdata, msg):
 
         if msg.topic == TOPIC_MOV:
             sucesso_bloco = True
-            salas_afetadas_neste_bloco = set() # <--- PASSO 3B: Iniciar o Set para guardar as salas
+            salas_para_verificar = set() 
             
             for mov in payload:
+                is_recente = mensagem_recente(mov.get('Hour'))
+                
+                marsami_id = int(mov['Marsami'])
+                origem = mov['RoomOrigin']
+                destino = mov['RoomDestiny']
+
+                if destino != 0 and origem != 0:
+                    corredor = (origem, destino)
+                    historico_corredores[corredor] = historico_corredores.get(corredor, 0) + 1
+                    
                 try:
                     db_cursor.callproc('SP_RegistarPassagem', [
                         id_simulacao_atual, mov['Marsami'], mov['RoomOrigin'],
                         mov['RoomDestiny'], mov['Status'], mov['_id']
                     ])
                     last_inserted_id = mov['_id']
-                    if mov['RoomDestiny'] != 0: # Ignora a sala 0
-                        salas_afetadas_neste_bloco.add(mov['RoomDestiny']) # <--- PASSO 3B: Guardar a sala de destino
+                    if destino != 0 and is_recente: 
+                        salas_para_verificar.add(destino)
                 except mysql.connector.Error as err:
                     print(f"[SQL] Erro no movimento {mov['_id']}: {err}")
                     sucesso_bloco = False
-                    break # Abandona o resto do bloco se der erro
+                    break 
 
             if sucesso_bloco:
-                db_conn.commit() # guarda tudo!
+                db_conn.commit() 
                 ack_payload = {"Player": N_JOGADOR, "last_id": last_inserted_id, "status": "OK"}
                 client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
                 
-                # <--- PASSO 3B: Chamar a função de gatilho de pontuação para as salas afetadas
-                for sala in salas_afetadas_neste_bloco:
+                # Disparar gatilhos APENAS para os dados recentes e consultando a BD!
+                for sala in salas_para_verificar:
                     verificar_gatilho_marsamis(client, sala, id_simulacao_atual, db_cursor)
 
-            else:
-                try:
-                    db_conn.commit() #tenta inserir o q ja tem
-                except:
-                    pass
-                print("[PC2] Bloco falhou a meio. Commit parcial efetuado.")
-                err_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
-                client.publish(TOPIC_ACK, json.dumps(err_payload), qos=2)
-
         elif msg.topic == TOPIC_PING:
-            # ... (código do PING mantém-se inalterado) ...
             try:
                 db_cursor.execute("SELECT IDMongo FROM medicoespassagens WHERE IDSimulacao = %s ORDER BY IDMedicao DESC LIMIT 1", (id_simulacao_atual,))
                 resultado = db_cursor.fetchone()
@@ -287,8 +369,11 @@ def on_message(client, userdata, msg):
 
             db_conn.commit()
             
-            # <--- PASSO 3A: Disparar os atuadores físicos após o commit local
-            verificar_sensores_atuadores(client, sensor_type, val) 
+            # Aplicação do Filtro Temporal: Se vieram 300 logs de som após quebra, 
+            # não vai disparar atuadores com 1 hora de atraso
+            is_recente = mensagem_recente(hora_sensor)
+            if is_recente:
+                verificar_sensores_atuadores(client, sensor_type, val) 
 
     except Exception as e:
         print(f"[ERRO CRÍTICO] {e}")
