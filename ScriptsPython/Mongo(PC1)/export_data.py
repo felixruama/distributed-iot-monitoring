@@ -2,7 +2,7 @@ import pymongo
 import csv
 import sys
 from datetime import datetime
-#python export_data.py <ID_simulação>
+#python export_data.py <Player>
 
 MONGO_URI = "mongodb://mongodb1:27018,mongodb2:27019,mongodb3:27020/?replicaSet=rs0"
 DB_NAME = "sensores_db"
@@ -18,11 +18,12 @@ def buscar_dados_no_mongo(tipo_filtro, id_simulacao=None):
 
     for nome_col in COLECOES:
         col = db[nome_col]
-        # Procura por Anomalia: True ou Outlier: True conforme o pedido
-        query = {tipo_filtro: True}
+
+        campo_busca = "isOutlier" if tipo_filtro == "Outlier" else "Anomalia"
+        query = {campo_busca: True}
 
         if id_simulacao:
-            query["IDSimulacao"] = int(id_simulacao)
+            query["Player"] = int(id_simulacao)
 
         cursor = col.find(query)
         for doc in cursor:
