@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 15, 2026 at 11:09 PM
+-- Generation Time: May 16, 2026 at 01:58 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -123,6 +123,7 @@ SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_VisualizarDetalhes_Hi
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_VisualizarDetalhes TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_ValidarParametros TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_IniciarSimulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_EstatisticasFinaisSimulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 
 ELSEIF p_Tipo = 'Monitor Android' THEN
             SET @qry = CONCAT('GRANT SELECT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
