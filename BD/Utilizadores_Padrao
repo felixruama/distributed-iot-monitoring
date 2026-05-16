@@ -46,9 +46,19 @@ CALL SP_CriarUtilizador(
 CALL SP_CriarUtilizador(
     'Membro Fora da Equipa',
     'outraequipa@lab.pt',
-    'equipa123',
+    'outraequipa123',
     'Utilizador',
     '910000002',
     '2000-01-01',
     8
+);
+
+CALL SP_CriarUtilizador(
+    'Admin',
+    'admin@lab.pt',
+    'admin123',
+    'Utilizador',
+    '910000002',
+    '2000-01-01',
+    7
 );
