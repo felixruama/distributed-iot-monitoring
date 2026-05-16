@@ -306,6 +306,11 @@ def on_message(client, userdata, msg):
                 # Disparar gatilhos APENAS para os dados recentes e consultando a BD!
                 for sala in salas_para_verificar:
                     verificar_gatilho_marsamis(client, sala, id_simulacao_atual, db_cursor)
+            else:
+                # O PC2 avisa o PC1 IMEDIATAMENTE que o MySQL falhou!
+                ack_payload = {"Player": N_JOGADOR, "status": "ERROR_DB"}
+                client.publish(TOPIC_ACK, json.dumps(ack_payload), qos=2)
+                print("[SQL] Aviso de ERROR_DB enviado instantaneamente ao PC1!")
 
         elif msg.topic == TOPIC_PING:
             try:
