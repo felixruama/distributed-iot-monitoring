@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: mysql
--- Generation Time: May 16, 2026 at 01:58 PM
+-- Generation Time: May 16, 2026 at 08:08 PM
 -- Server version: 8.0.45
 -- PHP Version: 8.3.30
 
@@ -124,6 +124,8 @@ SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_VisualizarDetalhes TO
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_ValidarParametros TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_IniciarSimulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_EstatisticasFinaisSimulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_ObterPerfil TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_ObterSimulacoesAtivas TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 
 ELSEIF p_Tipo = 'Monitor Android' THEN
             SET @qry = CONCAT('GRANT SELECT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
@@ -134,14 +136,15 @@ SET @qry = CONCAT('GRANT SELECT ON ', @db, '.marsami TO ', @usr); PREPARE s FROM
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.medicoespassagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.mensagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.simulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
-SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_GetResumoFinal TO ', @usr); PREPARE s FROM @qry; EXECUTE s; -- adicionei esta linha
+SET @qry = CONCAT('GRANT SELECT ON ', @db, '.utilizador TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT EXECUTE ON PROCEDURE ', @db, '.SP_GetResumoFinal TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 ELSEIF p_Tipo = 'Migrador' THEN
             SET @qry = CONCAT('GRANT SELECT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.som TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.temperatura TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT INSERT ON ', @db, '.ocupacaolabirinto TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
-SET @qry = CONCAT('GRANT SELECT, UPDATE ON ', @db, '.corredor TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
-SET @qry = CONCAT('GRANT SELECT, UPDATE ON ', @db, '.marsami TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT SELECT, INSERT, UPDATE ON ', @db, '.corredor TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
+SET @qry = CONCAT('GRANT SELECT, INSERT, UPDATE ON ', @db, '.marsami TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.medicoespassagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.mensagens TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
 SET @qry = CONCAT('GRANT SELECT ON ', @db, '.simulacao TO ', @usr); PREPARE s FROM @qry; EXECUTE s;
@@ -885,38 +888,6 @@ CREATE TABLE `utilizador` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
--- Dumping data for table `utilizador`
---
-
-INSERT INTO `utilizador` (`IDUtilizador`, `Nome`, `Telemovel`, `Tipo`, `Email`, `DataNascimento`, `Equipa`) VALUES
-                                                                                                                (1, 'Ana Maria Braga', NULL, '', 'ana@email.com', NULL, 0),
-                                                                                                                (2, 'Bruno Ramos', NULL, '', 'bruno@email.com', NULL, 0),
-                                                                                                                (3, 'Utilizador PHP 1', NULL, 'web', 'user1_php', NULL, 1),
-                                                                                                                (4, 'Utilizador PHP 2', NULL, 'web', 'user2_php', NULL, 2),
-                                                                                                                (7, 'ola', NULL, 'web', 'rrlfx@iscte.pt', NULL, 0),
-                                                                                                                (9, 'Maria Completa', '912345678', 'web', 'maria@teste.com', '1998-05-20', 0),
-                                                                                                                (10, 'Ricardo Tel', '933444555', 'web', 'ric@teste.com', NULL, 0),
-                                                                                                                (11, 'Joao Com Equipa', '912345678', 'web', 'joao.equipa@teste.com', '2000-01-01', 1),
-                                                                                                                (12, 'teste', NULL, 'web', 'teste', '2020-11-11', 7),
-                                                                                                                (13, 'Novo Dev', NULL, 'web', 'dev@lab.com', NULL, 1),
-                                                                                                                (14, 'ola', NULL, 'web', 'teste2@iscte.pt', '2020-12-12', 7),
-                                                                                                                (15, 'Chefe Supremo', '919999999', 'Admin', 'admin.master@lab.pt', '1980-05-20', 1),
-                                                                                                                (17, 'Chefe Supremo', '000000000', 'Admin', 'admin.grande@lab.pt', '1980-07-27', 1),
-                                                                                                                (18, 'Teste do Admin: Criar pela SP', NULL, 'Utilizador', 'UserFeitoPorAdim@lab.pt', NULL, 1),
-                                                                                                                (19, 'Nome Editado Com Sucesso', NULL, 'Utilizador', 'direto@lab.pt', NULL, 1),
-                                                                                                                (21, 'creda', '037167819', 'Utilizador', 'jogador.teste@lab.pt', '2000-01-07', 2),
-                                                                                                                (24, 'Novo Admin Supremo', '999888777', 'Admin', 'admin2@lab.pt', '1990-01-01', 1),
-                                                                                                                (25, 'Robo Marsami', NULL, 'Migrador', 'robo.migrador2@lab.pt', NULL, 1),
-                                                                                                                (26, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor@lab.pt', NULL, 1),
-                                                                                                                (27, 'Tablet Sala 1', NULL, 'Monitor Android', 'monitor2@lab.pt', NULL, 1),
-                                                                                                                (28, 'João pinba', '999999999', 'Utilizador', 'joao@lab.pt', '1995-05-19', 1),
-                                                                                                                (32, 'App Android', '910000001', 'Monitor Android', 'android@lab.pt', '2000-01-01', 7),
-                                                                                                                (33, 'Membro da Equipa', '910000002', 'Utilizador', 'equipa@lab.pt', '2005-01-09', 7),
-                                                                                                                (34, 'Script Migrador', '910000003', 'Migrador', 'migrador@lab.pt', '2000-01-01', 7),
-                                                                                                                (35, 'Outra Equipa', '910000002', 'Utilizador', 'outraequipa@lab.pt', '2000-01-01', 8),
-                                                                                                                (36, 'Outro user da Equipa', '910000002', 'Utilizador', 'outrouser@lab.pt', '2000-01-01', 7);
-
---
 -- Indexes for dumped tables
 --
 
@@ -1049,7 +1020,7 @@ ALTER TABLE `temperatura`
 -- AUTO_INCREMENT for table `utilizador`
 --
 ALTER TABLE `utilizador`
-    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=37;
+    MODIFY `IDUtilizador` int NOT NULL AUTO_INCREMENT;
 
 --
 -- Constraints for dumped tables
