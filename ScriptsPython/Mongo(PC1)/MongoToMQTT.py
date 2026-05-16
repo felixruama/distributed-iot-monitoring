@@ -266,7 +266,7 @@ def processar_movimentos_main():
                 mqtt_client.publish(TOPIC_MOV, json.dumps(batch_data), qos=2)
 
                 while not sucesso_bloco:
-                    recebeu_resposta = ack_event.wait(timeout=10.0)
+                    recebeu_resposta = ack_event.wait(timeout=6.0)
 
                     # 1. Se falhou (Timeout ou Crash na BD), pedimos a verdade ao PC2 (PING)
                     if not recebeu_resposta or status_recebido == "ERROR_DB":
