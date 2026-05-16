@@ -65,7 +65,7 @@ include('includes/header.php');
         
         <div class="params-display" style="display: flex; flex-direction: column; gap: 15px;">
             <div class="param-row" style="display: flex; justify-content: space-between; padding: 10px; background: #f9f9f9; border-radius: 8px;">
-                <span><strong>Temperaturas Críticas:</strong></span>
+                <span><strong>Temperaturas Críticas Alertas:</strong></span>
                 <span>
                     Mín: <?php echo $dados['TempMin'] ?? 'N/A'; ?>°C / 
                     Máx: <?php echo $dados['TempMax'] ?? 'N/A'; ?>°C
@@ -73,7 +73,7 @@ include('includes/header.php');
             </div>
             
             <div class="param-row" style="display: flex; justify-content: space-between; padding: 10px; background: #f9f9f9; border-radius: 8px;">
-                <span><strong>Ruído Crítico:</strong></span>
+                <span><strong>Ruído Crítico Alertas:</strong></span>
                 <span><?php echo $dados['RuidoMax'] ?? 'N/A'; ?> dB</span>
             </div>
             

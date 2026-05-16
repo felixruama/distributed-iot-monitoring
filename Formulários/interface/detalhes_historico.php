@@ -163,8 +163,8 @@ include('includes/header.php');
             <?php
                 // Removidas as linhas de Periodicidade e Intervalo de Alertas
                 $params = [
-                    ['Temperaturas Críticas:', 'Mín: ' . ($dados['TempMin'] ?? '0.00') . '°C / Máx: ' . ($dados['TempMax'] ?? '0.00') . '°C'],
-                    ['Ruído Crítico:', ($dados['RuidoMax'] ?? '0.00') . ' dB'],
+                    ['Temperaturas Críticas Alertas:', 'Mín: ' . ($dados['TempMin'] ?? '0.00') . '°C / Máx: ' . ($dados['TempMax'] ?? '0.00') . '°C'],
+                    ['Ruído Crítico Alertas:', ($dados['RuidoMax'] ?? '0.00') . ' dB'],
                     ['Pontuação Acumulada:', ($dados['Pontos'] ?? '0') . ' pts']
                 ];
 
