@@ -108,7 +108,7 @@ include('includes/header.php');
         </div>
 
         <div style="flex:1; background:#fff; padding:20px; border-top:5px solid #a19010; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-height: 180px; overflow-y: auto;">
-            <h4 style="margin:0 0 10px 0; color:#4b2394; font-size: 0.85rem; text-transform: uppercase;">🐆 Marsamis por Sala</h4>
+            <h4 style="margin:0 0 10px 0; color:#a19010; font-size: 0.85rem; text-transform: uppercase;">🐆 Marsamis por Sala</h4>
             <div style="display: flex; flex-direction: column; gap: 5px;">
                 <?php if (!empty($stats_distribuicao)): ?>
                     <?php foreach ($stats_distribuicao as $row): ?>
