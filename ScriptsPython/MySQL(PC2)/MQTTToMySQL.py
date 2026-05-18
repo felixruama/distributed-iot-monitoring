@@ -51,8 +51,8 @@ historico_corredores = {}
 portas_fechadas = False
 estado_ac = None
 DELTA_MAXIMO = 5
-margemAlertaSom = 5
-margemAlertaTemp = 5
+margemAlertaSom = 0
+margemAlertaTemp = 0
 
 def mensagem_recente(hora_str):
     """ Filtro Temporal Delta (Tolerância a Falhas) """
