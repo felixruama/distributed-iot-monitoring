@@ -5,6 +5,10 @@ import paho.mqtt.client as mqtt
 import argparse # Importado para ler argumentos da consola
 from datetime import datetime
 import time
+from dotenv import load_dotenv
+
+pasta_atual = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(pasta_atual, "..", ".env")) #pip install python-dotenv
 
 parser = argparse.ArgumentParser(description="Script: MQTT to MySQL")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
@@ -14,10 +18,10 @@ args = parser.parse_args()
 # Configurações Iniciais
 N_JOGADOR = 7
 MYSQL_CONFIG = {
-    'user': 'root',
-    'password': 'root', #METER NO ENV
-    'host': 'localhost',
-    'database': 'labirinto_DB'
+    'host': os.getenv('DB_LOCAL_HOST', 'localhost'),
+    'user': os.getenv('DB_LOCAL_USER'),
+    'password': os.getenv('DB_LOCAL_PASS'),
+    'database': os.getenv('DB_LOCAL_NAME', 'labirinto_DB')
 }
 
 # Tópicos
@@ -154,10 +158,10 @@ def carregar_limites_nuvem():
         try:
             print("[NUVEM] A carregar limites de término do labirinto (194.210.86.10)...")
             nuvem_conn = mysql.connector.connect(
-                host="194.210.86.10",
-                user="aluno",
-                password="aluno",
-                database="maze",
+                host=os.getenv('DB_CLOUD_HOST', '194.210.86.10'),
+                user=os.getenv('DB_CLOUD_USER'),
+                password=os.getenv('DB_CLOUD_PASS'),
+                database=os.getenv('DB_CLOUD_NAME', 'maze'),
                 connect_timeout=5
             )
             cursor = nuvem_conn.cursor(dictionary=True)

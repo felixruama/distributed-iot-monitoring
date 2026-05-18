@@ -2,20 +2,26 @@ import sys
 import mysql.connector
 import json
 from mysql.connector import Error
+import os
+from dotenv import load_dotenv
 
-# Configuracoes
+pasta_atual = os.path.dirname(os.path.abspath(__file__)) #pip install python-dotenv
+load_dotenv(os.path.join(pasta_atual, "..", ".env"))
+
+# Configuracoes MySQL Local
 MYSQL_CONFIG = {
-    'user': 'root',
-    'password': 'root', # Lembra-te de ajustar a password se necessário
-    'host': 'localhost',
-    'database': 'labirinto_DB'
+    'host': os.getenv('DB_LOCAL_HOST', 'localhost'),
+    'user': os.getenv('DB_LOCAL_USER'),
+    'password': os.getenv('DB_LOCAL_PASS'),
+    'database': os.getenv('DB_LOCAL_NAME', 'labirinto_DB')
 }
 
+# Configuracoes MySQL Nuvem
 CONFIG_NUVEM = {
-    'host': '194.210.86.10',
-    'user': 'aluno',
-    'password': 'aluno',
-    'database': 'maze'
+    'host': os.getenv('DB_CLOUD_HOST', '194.210.86.10'),
+    'user': os.getenv('DB_CLOUD_USER'),
+    'password': os.getenv('DB_CLOUD_PASS'),
+    'database': os.getenv('DB_CLOUD_NAME', 'maze')
 }
 
 db_conn = None

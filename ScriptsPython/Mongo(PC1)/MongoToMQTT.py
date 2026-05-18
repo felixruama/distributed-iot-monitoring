@@ -10,6 +10,9 @@ import paho.mqtt.client as mqtt
 import mysql.connector
 from bson.objectid import ObjectId
 
+pasta_atual = os.path.dirname(os.path.abspath(__file__)) #pip install python-dotenv
+load_dotenv(os.path.join(pasta_atual, "..", ".env"))
+
 parser = argparse.ArgumentParser(description="Script: Mongo to MQTT")
 parser.add_argument('--broker', type=str, default="broker.hivemq.com", help="Endereço do Broker MQTT")
 parser.add_argument('--mongo', type=str, default="mongodb://mongodb1:27018,mongodb2:27019,mongodb3:27020/?replicaSet=rs0", help="URI do MongoDB")
@@ -317,7 +320,12 @@ def obter_valores_iniciais_nuvem():
     while True:
         try:
             print("[INIT] A ligar à BD da Nuvem (194.210.86.10) para obter valores normais e estrutura...")
-            conexao_nuvem = mysql.connector.connect(host="194.210.86.10", user="aluno", password="aluno", database="maze")
+            conexao_nuvem = mysql.connector.connect(
+                host=os.getenv('DB_CLOUD_HOST', '194.210.86.10'),
+                user=os.getenv('DB_CLOUD_USER'),
+                password=os.getenv('DB_CLOUD_PASS'),
+                database=os.getenv('DB_CLOUD_NAME', 'maze')
+            )
             cursor = conexao_nuvem.cursor(dictionary=True)
             cursor.execute("SELECT normaltemperature, normalnoise, numbermarsamis FROM setupmaze LIMIT 1")
             resultado = cursor.fetchone()

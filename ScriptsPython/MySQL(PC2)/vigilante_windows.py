@@ -4,6 +4,10 @@ import subprocess
 import mysql.connector
 import argparse
 import sys
+from dotenv import load_dotenv
+
+pasta_atual = os.path.dirname(os.path.abspath(__file__)) #pip install python-dotenv
+load_dotenv(os.path.join(pasta_atual, "..", ".env"))
 
 # ==========================================
 # 1. LER ARGUMENTOS OPCIONAIS DA CONSOLA
@@ -19,10 +23,10 @@ broker_port = args.broker.split(':')[1] if ':' in args.broker else "1883"
 # 2. CONFIGURAR A LIGAÇÃO À BASE DE DADOS
 # ==========================================
 DB_CONFIG = {
-    'host': 'localhost',  # Corre no teu computador, logo é localhost
-    'user': 'root',
-    'password': 'root',  # Confirma se é esta a tua password
-    'database': 'labirinto_DB'
+    'host': os.getenv('DB_LOCAL_HOST', 'localhost'),
+    'user': os.getenv('DB_LOCAL_USER'),
+    'password': os.getenv('DB_LOCAL_PASS'),
+    'database': os.getenv('DB_LOCAL_NAME', 'labirinto_DB')
 }
 
 
