@@ -207,7 +207,7 @@ def procurar_simulacao_ativa():
     if not manter_conexao_viva(): return
     try:
         db_conn.commit()
-        db_cursor.execute("SELECT IDSimulacao, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta FROM simulacao WHERE Estado = '1' LIMIT 1")
+        db_cursor.execute("SELECT IDSimulacao, TempMaxAlerta, TempMinAlerta, RuidoMaxAlerta, Periodicidade FROM simulacao WHERE Estado = '1' LIMIT 1")
         resultado = db_cursor.fetchone()
 
         if resultado:
