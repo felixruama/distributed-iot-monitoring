@@ -235,6 +235,22 @@ def processar_movimentos_main():
                         if not any(c['Rooma'] == origem and c['Roomb'] == destino for c in lista_corredores_global):
                             raise ValueError("Corredor inválido")
 
+                        # 1.5 PROTEÇÃO CONTRA TELETRANSPORTE: Verifica onde ele estava antes
+                        ultimo_mov = db.Movimento.find_one({
+                            "Marsami": marsami_id,
+                            "Anomalia": False,
+                            "_id": {"$lt": doc["_id"]}
+                        }, sort=[("_id", -1)]) # O '-1' garante que pega exatamente no movimento imediatamente anterior!
+
+                        if ultimo_mov:
+                            ultima_sala_conhecida = int(ultimo_mov["RoomDestiny"])
+                            # Se a última sala onde ele chegou for diferente da sala de onde ele diz que está a sair agora:
+                            if ultima_sala_conhecida != origem:
+                                raise ValueError(f"Teletransporte detetado! Marsami {marsami_id} estava na sala {ultima_sala_conhecida} mas tentou mover-se a partir da {origem}.")
+                        else:
+                            # Se não existe histórico nenhum deste Marsami, ele NÃO PODE começar o jogo a partir do meio do labirinto!
+                            raise ValueError(f"Movimento ilegal: Marsami {marsami_id} tentou mover-se a partir da sala {origem} sem nunca ter partido da origem (0).")
+
                     elif destino != 0:
                         # 2. LARGADA INICIAL (Origem 0 -> Destino X): Verifica duplicados
                         duplicado = db.Movimento.find_one({
