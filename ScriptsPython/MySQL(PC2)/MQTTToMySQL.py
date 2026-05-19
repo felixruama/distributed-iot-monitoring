@@ -46,8 +46,8 @@ limites_alerta = {'temp_max': None, 'temp_min': None, 'som_max': None}
 limites_termino = {'temp_max': None, 'temp_min': None, 'som_max': None}
 
 # --- VARIÁVEIS DE ATUADORES ---
-ocupacao_memoria = {}
-historico_corredores = {}
+ocupacao_memoria = {} # n usamos p nada
+historico_corredores = {} #n usamos p nada
 portas_fechadas = False
 estado_ac = None
 DELTA_MAXIMO = 5
