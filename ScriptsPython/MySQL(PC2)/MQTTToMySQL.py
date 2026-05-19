@@ -81,7 +81,7 @@ def verificar_sensores_atuadores(client, sensor_type, valor):
             print(f"[ATUADOR] Ar Condicionado LIGADO (Ativado aos {valor}ºC)")
             
         # 2. A temperatura já desceu para um valor seguro (ex: 2 graus abaixo do t_max) -> DESLIGA O AC
-        elif limites_alerta['temp_max'] is not None and valor <= (t_max - 2) and estado_ac == 'ON':
+        elif limites_alerta['temp_max'] is not None and valor <= (t_max - 2) and estado_ac != 'OFF':
             msg = f"{{Type: AcOff, Player: {N_JOGADOR}}}"
             client.publish(TOPIC_ACTUATORS, msg, qos=1)
             estado_ac = 'OFF'
