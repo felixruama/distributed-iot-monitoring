@@ -42,7 +42,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
         (TOPIC_TEMP, 2),
         (TOPIC_MOV, 2)
     ])
-    print("A escutar mensagens (QoS 1) de todos os sensores...")
+    print("A escutar mensagens (QoS 2) de todos os sensores...")
 
 
 # Callback quando uma mensagem é recebida
