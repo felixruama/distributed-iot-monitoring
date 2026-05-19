@@ -350,7 +350,7 @@ def recuperar_historico_sensores(som_base, temp_base):
     global historico_som, historico_temp
 
     # Recupera os últimos 5 registos válidos de Som
-    ultimos_som = list(db["Som"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    ultimos_som = list(db["Som"].find({"isOutlier": False, "Anomalia": False, "Migrado": True}).sort("_id", -1).limit(5))
     if ultimos_som:
         # Fazemos reverse para a lista ficar do mais antigo para o mais recente
         historico_som = [float(doc["Sound"]) for doc in reversed(ultimos_som)]
@@ -358,7 +358,7 @@ def recuperar_historico_sensores(som_base, temp_base):
         historico_som = [som_base]
 
     # Recupera os últimos 5 registos válidos de Temperatura
-    ultimos_temp = list(db["Temperatura"].find({"isOutlier": False, "Anomalia": False}).sort("_id", -1).limit(5))
+    ultimos_temp = list(db["Temperatura"].find({"isOutlier": False, "Anomalia": False, "Migrado": True}).sort("_id", -1).limit(5))
     if ultimos_temp:
         historico_temp = [float(doc["Temperature"]) for doc in reversed(ultimos_temp)]
     else:
