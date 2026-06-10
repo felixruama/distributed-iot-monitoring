@@ -22,26 +22,40 @@ The ecosystem consists of a multi-layer, distributed infrastructure that ensures
 ### 📱 4.1 Android
 
 **Login page:**
+
+
 <img width="205" height="457" alt="Android Login" src="https://github.com/user-attachments/assets/326f1758-f870-489d-bb7f-2e94a49eb31a" />
 
 **Population / Temperature / Noise monitor:**
+
+
 <img width="677" height="443" alt="Android Dashboard" src="https://github.com/user-attachments/assets/9cf99285-aa2f-4934-92e9-2781f7cb7488" />
 
 **Alert messages:**
+
+
 <img width="211" height="477" alt="Android Alerts" src="https://github.com/user-attachments/assets/111d8742-b08d-471f-b13b-0c6b320f548a" />
 
 ### 🌐 4.2 Web Portal
 
 **Login:**
+
+
 <img width="724" height="340" alt="Web Portal Login" src="https://github.com/user-attachments/assets/95545586-3770-40f3-8618-618e6fdde29f" />
 
 **Create simulation:**
+
+
 <img width="721" height="413" alt="Create Simulation" src="https://github.com/user-attachments/assets/a23a712a-1a6f-465b-b0b0-c950e2670b1d" />
 
 **Simulation Details:**
+
+
 <img width="713" height="407" alt="Simulation Details" src="https://github.com/user-attachments/assets/bb51ab16-38a6-40a7-9b24-198ea2216c57" />
 
 **Simulation management:**
+
+
 <img width="718" height="303" alt="Simulation Management" src="https://github.com/user-attachments/assets/452fe1e7-0150-42c0-98c2-865dad17d415" />
 
 ---
