@@ -19,7 +19,7 @@ The ecosystem consists of a multi-layer, distributed infrastructure that ensures
    - **Web Portal (PHP):** Configuration, parameterization, and operational control of the simulation.
    - **Mobile App (Native Android - Java):** Analytical KPI dashboard with real-time charts and control room (NOC) monitoring.
 
-### 📱 4.1 Android
+###  4.1 Android
 
 **Login page:**
 
